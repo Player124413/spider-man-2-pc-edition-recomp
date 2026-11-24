@@ -41,6 +41,16 @@ mkdir -p "$tmp/x"
 7z x -y -bd -o"$tmp/x" "$tmp/archive" >/dev/null || { echo "fetch_game: не удалось распаковать (нужен zip/7z/rar)" >&2; exit 1; }
 rm -f "$tmp/archive"
 
+# Частая беда с архивами из GitHub: .bik (и другие ассеты) лежат как указатели Git LFS по 130 байт.
+# Такие «файлы» рекомпилятор примет за битые ролики — игра запустится, но все видео будут отсутствовать.
+lfs=$(find "$tmp/x" -type f -size -4096c -exec grep -l -F 'version https://git-lfs.github.com/spec/v1' {} + 2>/dev/null | head -1 || true)
+if [ -n "$lfs" ]; then
+  echo "fetch_game: $(basename "$lfs") — указатель Git LFS, а не файл игры. Нужны реальные файлы:" >&2
+  echo "  git lfs install && git lfs pull   (в клоне исходной игры, затем заново упаковать архив)" >&2
+  echo "  Настоящий .bik начинается с «BIK» и весит мегабайты, а не 132 байта." >&2
+  exit 1
+fi
+
 core=$(find "$tmp/x" -type f -iname core.dll | head -1)
 [ -n "$core" ] || { echo "fetch_game: в архиве нет System/Core.dll" >&2; exit 1; }
 sys=$(dirname "$core")

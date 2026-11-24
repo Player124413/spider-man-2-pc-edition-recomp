@@ -178,10 +178,12 @@ class LauncherActivity : Activity() {
             ?: if (missing.isNotEmpty()) L.t("Пропали System/${missing.joinToString(", ")} — «Импорт из папки…»",
                 "Missing System/${missing.joinToString(", ")} — “Import from folder…”") else null
         val backup = GameFolder.fromBackup(s.gameDir, mods)
-        status.text = err?.let { "⚠ $it" } ?: (L.t("✓ Игра найдена", "✓ Game found") +
+        val movieWarn = GameFolder.movieProblem(s.gameDir)
+        status.text = (err?.let { "⚠ $it" } ?: (L.t("✓ Игра найдена", "✓ Game found") +
             if (backup.isNotEmpty()) L.t(" (${backup.joinToString(", ")} — из копии приложения)",
-                " (${backup.joinToString(", ")} from the app's copy)") else "")
-        status.setTextColor(if (err == null) Ui.ACCENT else 0xFFFFB74D.toInt())
+                " (${backup.joinToString(", ")} from the app's copy)") else "")) +
+            (if (movieWarn != null) "\n⚠ $movieWarn" else "")
+        status.setTextColor(if (err == null && movieWarn == null) Ui.ACCENT else 0xFFFFB74D.toInt())
         pathLabel?.text = s.gameDir
         variantLabel?.text = variantText()
     }

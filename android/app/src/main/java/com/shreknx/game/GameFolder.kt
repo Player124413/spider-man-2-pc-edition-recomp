@@ -52,6 +52,27 @@ object GameFolder {
             "System. After the next successful start the port keeps a copy of these files in the app's internal " +
             "storage, out of reach of cleaners and antiviruses, so the game starts even if they are deleted again.")
 
+    // Архивы, скачанные с GitHub без Git LFS, содержат вместо .bik текстовые указатели по ~132 байта.
+    // Игра при этом запускается, но все ролики (Activision, Marvel, вступления) отсутствуют.
+    fun movieProblem(path: String): String? {
+        val movies = child(File(path), "Movies")
+            ?: return L.t("Нет папки Movies — ролики не покажутся", "No Movies folder — videos will not play")
+        val biks = movies.listFiles()?.filter { it.isFile && it.name.endsWith(".bik", true) }.orEmpty()
+        if (biks.isEmpty())
+            return L.t("В Movies нет .bik — ролики не покажутся", "No .bik files in Movies — videos will not play")
+        val lfs = biks.firstOrNull { f ->
+            if (f.length() >= 4096) false else try {
+                f.bufferedReader().use { it.readLine()?.startsWith("version https://git-lfs.github.com/spec/v1") == true }
+            } catch (e: Exception) { false }
+        }
+        if (lfs != null)
+            return L.t("${lfs.name} — указатель Git LFS (${lfs.length()} байт), не видео. Возьмите реальные .bik " +
+                "(git lfs pull в клоне игры) и скопируйте в Movies",
+                "${lfs.name} is a Git LFS pointer (${lfs.length()} bytes), not a video. Get real .bik files " +
+                "(git lfs pull in the game clone) and copy them into Movies")
+        return null
+    }
+
     class Progress(var files: Int = 0, var bytes: Long = 0, var current: String = "")
 
     // рекурсивное копирование дерева SAF в dst; cancel() — прервать; onProgress зовётся из потока копирования

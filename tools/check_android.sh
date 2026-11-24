@@ -15,6 +15,7 @@ check "Workflow" "test -f '$ROOT/.github/workflows/android.yml' && grep -q 'SNX_
 check "имя exe в лаунчере" "grep -q '\"Webhead.exe\"' '$ROOT/android/app/src/main/java/com/shreknx/game/GameFolder.kt'"
 check "нет game.exe в исходниках порта" "! grep -rq 'game.exe' '$ROOT/android/app/src/main/java' '$ROOT/tools/fetch_game.sh'"
 check "fetch_game: PE по имени из addrmap" "grep -q 'exe_dst = next' '$ROOT/tools/fetch_game.sh' && ! grep -q 'dst, \"Webhead.exe\"' '$ROOT/tools/fetch_game.sh'"
+check "диагностика Git LFS в роликах" "grep -q 'git-lfs.github.com/spec/v1' '$ROOT/tools/fetch_game.sh' && grep -q 'movieProblem' '$ROOT/android/app/src/main/java/com/shreknx/game/GameFolder.kt'"
 
 # Один APK на обе локализации: никаких eng/rus/both/uni во workflow, Gradle и скрипте сборки
 check "одна ссылка на игру в workflow" "grep -q 'game_url:' '$ROOT/.github/workflows/android.yml' && ! grep -q '^ *variant:' '$ROOT/.github/workflows/android.yml'"

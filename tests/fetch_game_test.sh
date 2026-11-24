@@ -33,6 +33,13 @@ mkdir -p "$T/src/Spider-Man 2/Maps" && echo map > "$T/src/Spider-Man 2/Maps/a.un
 (cd "$T/src" && 7z a -tzip "$T/srv/game.zip" "Spider-Man 2" >/dev/null && 7z a -t7z "$T/srv/game.7z" "Spider-Man 2" >/dev/null)
 rm "$T/src/Spider-Man 2/SYSTEM/gui.dll"
 (cd "$T/src" && 7z a -tzip "$T/srv/nogui.zip" "Spider-Man 2" >/dev/null)
+# Git LFS-указатель вместо видео: игра запустится, но роликов не будет — ошибка должна быть сразу
+mkdir -p "$T/src/Spider-Man 2/Movies"
+printf 'version https://git-lfs.github.com/spec/v1\noid sha256:0000\nsize 1\n' \
+  > "$T/src/Spider-Man 2/Movies/Marvel.bik"
+(cd "$T/src" && 7z a -tzip "$T/srv/lfs.zip" "Spider-Man 2" >/dev/null)
+rm -rf "$T/src/Spider-Man 2/Movies"
+
 echo '<!DOCTYPE html><html>login</html>' > "$T/srv/page.zip"
 head -c 4096 /dev/urandom > "$T/srv/junk.zip"
 
@@ -69,6 +76,7 @@ bad() {  # bad <архив> <ожидаемый текст ошибки>
 ok game.zip
 ok game.7z
 bad nogui.zip "нет GUI.dll"
+bad lfs.zip "LFS"
 bad page.zip "веб-страница"
 bad junk.zip "не удалось распаковать"
 bad missing.zip "404"
