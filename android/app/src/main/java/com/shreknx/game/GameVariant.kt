@@ -39,8 +39,10 @@ object GameVariant {
                 }
             } else {
                 for (v in b) {
-                    if (v in 0xC0..0xFF || v == 0xA8 || v == 0xB8) cyr++
-                    else if (v in 0x41..0x7A) latin++
+                    // Byte в Kotlin знаковый: приводим к беззнаковому, иначе 0xA8/0xB8 — отрицательные
+                    val u = v.toInt() and 0xFF
+                    if (u in 0xC0..0xFF || u == 0xA8 || u == 0xB8) cyr++
+                    else if (u in 0x41..0x7A) latin++
                 }
             }
             if (cyr > 8 && cyr > latin / 4) return RUS
