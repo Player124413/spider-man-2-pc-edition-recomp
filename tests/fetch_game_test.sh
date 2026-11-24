@@ -9,16 +9,16 @@ PORT=${PORT:-18765}
 trap 'kill $SRV 2>/dev/null || true; rm -rf "$T"' EXIT
 
 mods=$(python3 -c "import json; print(' '.join(json.load(open('$ROOT/recomp/addrmap.json'))['modules']))")
-mkdir -p "$T/src/Shrek 2/SYSTEM" "$T/srv"
+mkdir -p "$T/src/Spider-Man 2/SYSTEM" "$T/srv"
 for m in $mods; do
   lower=$(printf %s "$m" | tr 'A-Z' 'a-z')
-  echo "$m" > "$T/src/Shrek 2/SYSTEM/$lower"  # регистр не как в addrmap.json
+  echo "$m" > "$T/src/Spider-Man 2/SYSTEM/$lower"  # регистр не как в addrmap.json
 done
-echo ini > "$T/src/Shrek 2/SYSTEM/Default.ini"
-mkdir -p "$T/src/Shrek 2/Maps" && echo map > "$T/src/Shrek 2/Maps/a.unr"
-(cd "$T/src" && 7z a -tzip "$T/srv/game.zip" "Shrek 2" >/dev/null && 7z a -t7z "$T/srv/game.7z" "Shrek 2" >/dev/null)
-rm "$T/src/Shrek 2/SYSTEM/gui.dll"
-(cd "$T/src" && 7z a -tzip "$T/srv/nogui.zip" "Shrek 2" >/dev/null)
+echo ini > "$T/src/Spider-Man 2/SYSTEM/Default.ini"
+mkdir -p "$T/src/Spider-Man 2/Maps" && echo map > "$T/src/Spider-Man 2/Maps/a.unr"
+(cd "$T/src" && 7z a -tzip "$T/srv/game.zip" "Spider-Man 2" >/dev/null && 7z a -t7z "$T/srv/game.7z" "Spider-Man 2" >/dev/null)
+rm "$T/src/Spider-Man 2/SYSTEM/gui.dll"
+(cd "$T/src" && 7z a -tzip "$T/srv/nogui.zip" "Spider-Man 2" >/dev/null)
 echo '<!DOCTYPE html><html>login</html>' > "$T/srv/page.zip"
 head -c 4096 /dev/urandom > "$T/srv/junk.zip"
 

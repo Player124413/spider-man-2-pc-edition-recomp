@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Snx" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:colorPrimary">@color/snx_accent_dark</item>
+        <item name="android:colorPrimaryDark">@color/snx_bg</item>
+        <item name="android:colorAccent">@color/snx_accent</item>
+        <item name="android:windowBackground">@color/snx_bg</item>
+        <item name="android:statusBarColor">@color/snx_bg</item>
+        <item name="android:navigationBarColor">@color/snx_bg</item>
+        <item name="android:textColor">@color/snx_text</item>
+    </style>
+    <!-- игра и редактор: весь экран, включая вырез камеры -->
+    <style name="Theme.Snx.Fullscreen">
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowBackground">@android:color/black</item>
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+    </style>
+</resources>

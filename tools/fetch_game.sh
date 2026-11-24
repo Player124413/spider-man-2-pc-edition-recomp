@@ -1,9 +1,9 @@
 #!/bin/sh
-# Скачать архив своей копии игры по ссылке и достать из него папку System (DLL и game.exe — вход рекомпилятора).
+# Скачать архив своей копии игры по ссылке и достать из него папку System (DLL и Webhead.exe — вход рекомпилятора).
 #   tools/fetch_game.sh <ссылка> <куда положить System>
 # Ссылка: прямая на файл или публичная Яндекс Диска (disk.yandex.ru, yadi.sk), Google Диска, Dropbox.
 # Архив: zip, 7z или rar (распаковывает 7z); внутри — папка игры целиком или только System, на любой глубине.
-# Для русской версии в System должен лежать распакованный английский game.exe (как делает tools/make_rus.sh).
+# Для русской версии в System должен лежать распакованный английский Webhead.exe (как делает tools/make_rus.sh).
 # Используется workflow .github/workflows/android.yml (поле «Ссылка на архив игры»).
 set -eu
 url=${1:?usage: $0 <url> <dest System dir>}
@@ -12,7 +12,7 @@ tmp=${TMPDIR:-/tmp}/snx-fetch.$$
 mkdir -p "$tmp"
 trap 'rm -rf "$tmp"' EXIT
 
-UA="Mozilla/5.0 (X11; Linux x86_64) shrekNX-fetch"
+UA="Mozilla/5.0 (X11; Linux x86_64) webheadNX-fetch"
 case "$url" in
   *disk.yandex.*|*yadi.sk*)
     # публичная ссылка -> временная прямая через API Диска
@@ -44,11 +44,11 @@ rm -f "$tmp/archive"
 core=$(find "$tmp/x" -type f -iname core.dll | head -1)
 [ -n "$core" ] || { echo "fetch_game: в архиве нет System/Core.dll" >&2; exit 1; }
 sys=$(dirname "$core")
-exe=$(find "$sys" -maxdepth 1 -type f -iname game.exe | head -1)
-[ -n "$exe" ] || { echo "fetch_game: в $(basename "$sys") нет game.exe" >&2; exit 1; }
+exe=$(find "$sys" -maxdepth 1 -type f -iname Webhead.exe | head -1)
+[ -n "$exe" ] || { echo "fetch_game: в $(basename "$sys") нет Webhead.exe" >&2; exit 1; }
 
 # модули из recomp/addrmap.json — с именами в его регистре (на Linux регистр важен); защищённый SafeDisc
-# game.exe (секции stxt*) рекомпилировать нельзя: нужен распакованный (README, «Таблетка»)
+# Webhead.exe (секции stxt*) рекомпилировать нельзя: нужен распакованный (README, «Таблетка»)
 PY=python3
 [ -x "$(dirname "$0")/.venv/bin/python" ] && PY="$(dirname "$0")/.venv/bin/python"
 "$PY" - "$sys" "$dest" "$(dirname "$0")/../recomp/addrmap.json" <<'PYEOF'
@@ -66,12 +66,12 @@ for n in names:
 try:
     import pefile
     try:
-        pe = pefile.PE(os.path.join(dst, "game.exe"), fast_load=True)
+        pe = pefile.PE(os.path.join(dst, "Webhead.exe"), fast_load=True)
     except pefile.PEFormatError as e:
-        sys.exit("fetch_game: game.exe — не исполняемый файл Windows (%s)" % e)
+        sys.exit("fetch_game: Webhead.exe — не исполняемый файл Windows (%s)" % e)
     secs = [s.Name.rstrip(b"\0").decode("latin-1") for s in pe.sections]
     if any(x.lower().startswith("stxt") for x in secs):
-        sys.exit("fetch_game: game.exe защищён SafeDisc (секции %s) — положите в System распакованный game.exe"
+        sys.exit("fetch_game: Webhead.exe защищён SafeDisc (секции %s) — положите в System распакованный Webhead.exe"
                  % ", ".join(secs))
 except ImportError:
     pass

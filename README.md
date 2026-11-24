@@ -42,6 +42,10 @@ tools/recomp.sh all
 `all` заканчивается строкой `HEADLESS SMOKE OK: startup без trap, кадров: N`.
 Только headless-проверка (после `gen`/`build`): `tools/recomp.sh headless`.
 
+Интерактивный Android-порт (SDL2 + GLES3 + OpenAL + Bink/FFmpeg, экранное управление и геймпад) собирается
+из этой же рекомпиляции: `tools/android_deps.sh --ffmpeg && tools/build.sh android` →
+`build/webheadNX-eng.apk`. Требуются JDK 17 и Android SDK/NDK 27; подробности — [docs/ANDROID.md](docs/ANDROID.md).
+
 Переменные окружения: `GAME` (путь к каталогу игры, по умолчанию `references/coolgame`),
 `JOBS` (число параллельных процессов), `GEN` (каталог сгенерированного C), `CC`.
 

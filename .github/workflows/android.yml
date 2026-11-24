@@ -1,0 +1,263 @@
+# Сборка APK для Android (docs/ANDROID.md, «Сборка в GitHub Actions»).
+# Без игры (push, PR или «Run workflow» с пустой ссылкой) — APK со всем кодом порта, лаунчером и редактором
+# управления, но без кода игры (SNX_NO_GAME): «Играть» сообщает, что игры в сборке нет. Push и PR собирают
+# С игрой — «Run workflow» со ссылкой на архив своей копии игры (или секрет SNX_GAME_SYSTEM_URL): код игры
+# Артефакт — сам APK (без zip), подписанный постоянным ключом (android/shreknx-release.jks.b64): новая сборка
+# ставится поверх старой без удаления; versionCode — по времени коммита (растёт с каждым коммитом).
+name: Android APK
+
+on:
+  push:
+    paths:
+      - 'android/**'
+      - 'cmake/**'
+      - 'CMakeLists.txt'
+      - 'platform/**'
+      - 'runtime/**'
+      - 'host/**'
+      - 'recomp/**'
+      - 'tools/android_deps.sh'
+      - 'tools/build.sh'
+      - 'tools/fetch_game.sh'
+      - 'tests/fetch_game_test.sh'
+      - '.github/workflows/android.yml'
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      game_url:
+        description: 'Ссылка на архив игры (zip/7z/rar: папка игры или System; прямая, Яндекс Диск, Google Диск, Dropbox). Пусто — APK без игры'
+        type: string
+        default: ''
+      release:
+        description: 'Выпустить APK без игры в GitHub Releases (лаунчер проверяет там обновления). APK с кодом игры не выпускается'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  # загрузка архива игры по ссылке (tools/fetch_game.sh) — на синтетических архивах, без игры
+  fetch-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: tools/fetch_game.sh
+        run: sh tests/fetch_game_test.sh
+
+  apk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    # contents: write — только для шага «Выпуск» (gh release); остальные шаги токен не используют
+    permissions:
+      contents: write
+    env:
+      NDK_VERSION: 27.2.12479018
+    steps:
+      # ссылку читаем из события, а не через ${{ inputs.* }}: иначе она попадёт в текст шага в логе
+      - name: Режим сборки
+        id: mode
+        env:
+          SECRET_URL: ${{ secrets.SNX_GAME_SYSTEM_URL }}
+        run: |
+          ev() { jq -r ".inputs.$1 // \"\"" "$GITHUB_EVENT_PATH"; }
+          URL=$(ev game_url | tr -d '[:space:]')
+          [ -n "$URL" ] || URL="$SECRET_URL"
+          [ -n "$URL" ] && echo "::add-mask::$URL"
+          # рекомпиляция сделана из английской копии (coolgame): только flavor eng
+          VARIANT=eng
+          PLAT=android
+          FL=eng
+          GAME=0
+          if [ -n "$URL" ]; then
+            GAME=1
+            printf %s "$URL" > "$RUNNER_TEMP/game_url"
+          fi
+          {
+            echo "game=$GAME"
+            echo "variant=$VARIANT"
+            echo "plat=$PLAT"
+            echo "apk=build/webheadNX-$FL.apk"
+            echo "flavor=$FL"
+          } >> "$GITHUB_OUTPUT"
+          echo "### Сборка: $([ $GAME = 1 ] && echo "с игрой ($VARIANT)" || echo "без игры")" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0  # versionCode = число коммитов
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Android SDK (NDK 27, CMake 3.31.6, API 35)
+        run: |
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKM" --licenses >/dev/null || true
+          "$SDKM" --install "platforms;android-35" "build-tools;35.0.0" "ndk;$NDK_VERSION" "cmake;3.31.6" >/dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+
+      - name: Кэш библиотек (SDL2, OpenAL, ogg/vorbis, FreeType, FFmpeg)
+        id: deps-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: build/android-deps
+          key: android-deps-${{ hashFiles('tools/android_deps.sh') }}-ndk${{ env.NDK_VERSION }}
+
+      - name: Кэш Gradle
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            build/gradle
+          key: gradle-${{ hashFiles('android/**/*.gradle', 'android/gradle/wrapper/gradle-wrapper.properties') }}
+
+      - name: Библиотеки
+        run: tools/android_deps.sh --ffmpeg
+
+      - name: Сохранить кэш библиотек
+        if: steps.deps-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: build/android-deps
+          key: ${{ steps.deps-cache.outputs.cache-primary-key }}
+
+      - name: Игра по ссылке → код рекомпилятора
+        if: steps.mode.outputs.game == '1'
+        env:
+          VARIANT: ${{ steps.mode.outputs.variant }}
+        run: |
+          python3 -m venv tools/.venv
+          tools/.venv/bin/python -m pip install -q -r tools/requirements.txt
+          gen() {  # gen <файл со ссылкой> <System> <каталог кода>
+            tools/fetch_game.sh "$(cat "$1")" "$2"
+            rm -f "$1"
+            time tools/.venv/bin/python -I recomp/main.py gen --game "$2" --out "$3"
+            du -sh "$3"
+          }
+          gen "$RUNNER_TEMP/game_url" game/System build/gen
+
+      - name: Сборка APK
+        shell: bash
+        env:
+          PLAT: ${{ steps.mode.outputs.plat }}
+        run: |
+          set -o pipefail
+          tools/build.sh "$PLAT" --no-daemon 2>&1 | tee "$RUNNER_TEMP/build.log"
+
+      - name: Ошибки сборки — в аннотации
+        if: failure()
+        shell: bash
+        run: |
+          esc() { sed -e 's/%/%25/g' | awk 'BEGIN{ORS="%0A"} {print}'; }
+          L="$RUNNER_TEMP/build.log"
+          [ -f "$L" ] || exit 0
+          grep -nE -A12 "What went wrong|CMake Error|error:|undefined (symbol|reference)" "$L" | grep -v "^\s*at " | head -120 | cut -c1-400 \
+            > "$RUNNER_TEMP/err.txt" || true
+          echo "::error title=build errors::$(esc < "$RUNNER_TEMP/err.txt")"
+          echo "::error title=build tail::$(grep -v "^\s*at " "$L" | tail -n 60 | cut -c1-300 | esc)"
+
+      - name: Проверка APK
+        env:
+          APK: ${{ steps.mode.outputs.apk }}
+          GAME: ${{ steps.mode.outputs.game }}
+          FLAVOR: ${{ steps.mode.outputs.flavor }}
+        run: |
+          ls -l "$APK"
+          unzip -l "$APK" > "$RUNNER_TEMP/apk.txt"
+          for f in lib/arm64-v8a/libmain.so lib/arm64-v8a/libSDL2.so classes.dex AndroidManifest.xml; do
+            grep -q " $f\$" "$RUNNER_TEMP/apk.txt" || { echo "::error::в APK нет $f"; cat "$RUNNER_TEMP/apk.txt"; exit 1; }
+          done
+          BT="$ANDROID_HOME/build-tools/35.0.0"
+          "$BT/apksigner" verify --print-certs "$APK" > "$RUNNER_TEMP/cert.txt"
+          head -3 "$RUNNER_TEMP/cert.txt"
+          # постоянный ключ репозитория (android/shreknx-release.jks.b64): иначе обновление не встанет поверх
+          D=$(sed -n 's/.*certificate SHA-256 digest: //p' "$RUNNER_TEMP/cert.txt" | head -1)
+          [ "$D" = 90071132e1f6152373649029ee9c3f41cf5feba67132318a3186e0ff4f491a2f ] \
+            || { echo "::error::APK подписан не ключом android/shreknx-release.jks.b64 ($D)"; exit 1; }
+          # выравнивание в zip (несжатые .so — по 16 КБ): иначе установщик отвечает «Приложение не установлено»
+          "$BT/zipalign" -c -P 16 4 "$APK" || { echo "::error::APK не выровнен (zipalign -c -P 16 4)"; exit 1; }
+          # libmain.so: JNI экранного управления и SDL_main на месте, выравнивание 16 КБ, ролики (FFmpeg)
+          TC="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          unzip -o -q "$APK" lib/arm64-v8a/libmain.so -d "$RUNNER_TEMP/apk"
+          SO="$RUNNER_TEMP/apk/lib/arm64-v8a/libmain.so"
+          "$TC/llvm-nm" -D --defined-only "$SO" > "$RUNNER_TEMP/syms.txt"
+          for s in SDL_main Java_com_shreknx_game_SnxNative_pad Java_com_shreknx_game_SnxNative_look \
+                   Java_com_shreknx_game_SnxNative_key Java_com_shreknx_game_SnxNative_state; do
+            grep -q " T $s\$" "$RUNNER_TEMP/syms.txt" || { echo "::error::в libmain.so нет $s"; exit 1; }
+          done
+          "$TC/llvm-readelf" -lW "$SO" | grep LOAD | awk '{ if ($NF != "0x4000") bad=1 } END { exit bad }' \
+            || { echo "::error::LOAD-сегменты не выровнены на 16 КБ"; exit 1; }
+          grep -q "SNX_ANDROID_VIDEO:BOOL=ON" build/android-cxx/Release/*/arm64-v8a/CMakeCache.txt \
+            || { echo "::error::libmain.so собран без роликов (SNX_ANDROID_VIDEO=OFF)"; exit 1; }
+          # с игрой в libmain.so должен быть код модулей (mod_core и т. д.), без игры — сообщение SNX_NO_GAME
+          if [ "$GAME" = 1 ]; then
+            ! grep -aq "SNX_NO_GAME" "$SO" || { echo "::error::libmain.so собран без модулей игры"; exit 1; }
+          else
+            grep -aq "SNX_NO_GAME" "$SO" || { echo "::error::ожидалась сборка без игры"; exit 1; }
+          fi
+          {
+            "$BT/aapt2" dump badging "$APK" | grep -E "^package|^minSdkVersion|^targetSdkVersion|^launchable"
+            echo "APK: $(stat -c %s "$APK") байт"
+            unzip -lv "$APK" | awk '/lib\/arm64-v8a\// { print $NF ": " $1 " байт (" $2 ")" }'
+            echo "NEEDED: $("$TC/llvm-readelf" -d "$SO" | sed -n 's/.*Shared library: \[\(.*\)\]/\1/p' | tr '\n' ' ')"
+          } > "$RUNNER_TEMP/summary.txt"
+          echo "::notice title=APK::$(sed -e 's/%/%25/g' "$RUNNER_TEMP/summary.txt" | awk 'BEGIN{ORS="%0A"} {print}')"
+          cat "$RUNNER_TEMP/summary.txt" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Имя файла
+        id: pack
+        env:
+          APK: ${{ steps.mode.outputs.apk }}
+          GAME: ${{ steps.mode.outputs.game }}
+          VARIANT: ${{ steps.mode.outputs.variant }}
+        run: |
+          VER=$("$ANDROID_HOME/build-tools/35.0.0/aapt2" dump badging "$APK" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p")
+          if [ "$GAME" = 1 ]; then NAME="Webhead2-$VARIANT-$VER.apk"; DAYS=7; else NAME="webheadNX-nogame-$VARIANT-$VER.apk"; DAYS=14; fi
+          mkdir -p build/out
+          cp "$APK" "build/out/$NAME"
+          echo "path=build/out/$NAME" >> "$GITHUB_OUTPUT"
+          echo "ver=$VER" >> "$GITHUB_OUTPUT"
+          echo "days=$DAYS" >> "$GITHUB_OUTPUT"
+          echo "APK: **$NAME**" >> "$GITHUB_STEP_SUMMARY"
+
+      # archive: false — скачивается сам .apk, а не zip с ним (имя артефакта — имя файла)
+      - name: Артефакт
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ steps.pack.outputs.path }}
+          archive: false
+          retention-days: ${{ steps.pack.outputs.days }}
+          if-no-files-found: error
+
+      # Выпуск для проверки обновлений лаунчером (Updater.kt ищет в выпусках APK с именем
+      # <Webhead2|webheadNX-nogame>-<eng>-<версия>.apk и сравнивает число после последнего «-»). Только APK без
+      # игры: в APK с игрой — переведённый код игры, его не распространяем (AGENTS.md, правило 6).
+      - name: Выпуск (GitHub Releases)
+        if: github.event_name == 'workflow_dispatch' && inputs.release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GAME: ${{ steps.mode.outputs.game }}
+          APK: ${{ steps.pack.outputs.path }}
+          VER: ${{ steps.pack.outputs.ver }}
+        run: |
+          if [ "$GAME" = 1 ]; then
+            echo "::error::Выпуск — только для APK без игры (в APK с игрой — переведённый код игры)"
+            exit 1
+          fi
+          TAG="v$VER"
+          gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create "$TAG" -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "webheadNX $VER" \
+              --notes "Сборка $VER ($(git log -1 --format=%h)): $(git log -1 --format=%s)"
+          gh release upload "$TAG" "$APK" -R "$GITHUB_REPOSITORY" --clobber
+          echo "Выпуск: **$TAG**" >> "$GITHUB_STEP_SUMMARY"

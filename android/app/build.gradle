@@ -1,0 +1,160 @@
+// Приложение: лаунчер (com.shreknx.game.LauncherActivity) и игра (GameActivity — SDLActivity в отдельном
+// процессе). Нативная часть — корневой CMakeLists.txt (ANDROID: cmake/android.cmake): libSDL2.so + libmain.so
+// со сгенерированным кодом игры из build/gen (eng) или build/gen-rus (rus).
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+def repoRoot = file('../..')
+def depsDir = project.hasProperty('snx.deps') ? file(project.property('snx.deps')) : new File(repoRoot, 'build/android-deps')
+def sdlJava = new File(depsDir, 'SDL/android-project/app/src/main/java')
+if (!sdlJava.exists()) {
+    throw new GradleException("Нет ${sdlJava}: сначала запусти tools/android_deps.sh")
+}
+
+// versionCode — минуты от 2026-01-01 до времени последнего коммита: растёт с каждым коммитом и больше любого
+// прежнего (раньше было число коммитов, ≤ 19), поэтому новая сборка всегда ставится поверх старой, а не
+// «Приложение не установлено» из-за понижения версии. versionName — 0.1.0-<число коммитов>, как в именах APK.
+// -Psnx.versionCode=N — вручную. В CI нужен полный клон (fetch-depth: 0), иначе число коммитов — 1.
+def git = { List<String> args, int fallback ->
+    try {
+        def p = (['git', '-C', repoRoot.absolutePath] + args).execute()
+        def out = p.text.trim()
+        p.waitFor() == 0 && out ? out.toLong() : fallback
+    } catch (Exception ignored) {
+        fallback
+    }
+}
+def snxCommits = git(['rev-list', '--count', 'HEAD'], 1)
+def snxCommitMinutes = Math.max(1000L, (git(['log', '-1', '--format=%ct'], 0) - 1767225600L).intdiv(60) as long)
+def snxVersionCode = project.hasProperty('snx.versionCode') ? project.property('snx.versionCode').toString().toInteger() : (snxCommitMinutes as int)
+
+android {
+    namespace 'com.shreknx.game'
+    compileSdk 35
+    ndkVersion '27.2.12479018'
+
+    defaultConfig {
+        applicationId 'com.shreknx.game'
+        minSdk 24          // Android 7.0: OpenGL ES 3.0 есть везде, AAudio — с 8.1 (иначе OpenSL ES)
+        targetSdk 35
+        versionCode snxVersionCode
+        versionName "0.1.0-${snxCommits}"
+        ndk {
+            abiFilters 'arm64-v8a'  // окно гостя — 4 ГБ адресов: только 64-битные телефоны
+        }
+        externalNativeBuild {
+            cmake {
+                arguments "-DSNX_ANDROID_DEPS=${depsDir.absolutePath}", '-DANDROID_STL=c++_static',
+                          '-DANDROID_PLATFORM=android-24', '-DCMAKE_BUILD_TYPE=Release'
+                targets 'snx_boot', 'SDL2'
+            }
+        }
+    }
+
+    flavorDimensions 'lang'
+    productFlavors {
+        eng {
+            dimension 'lang'
+            resValue 'string', 'app_name', 'Spider-Man 2'
+            buildConfigField 'String', 'VARIANT', '"eng"'
+        }
+        rus {
+            dimension 'lang'
+            applicationIdSuffix '.rus'   // ставится рядом с английской
+            resValue 'string', 'app_name', 'Spider-Man 2'
+            buildConfigField 'String', 'VARIANT', '"rus"'
+            externalNativeBuild { cmake { arguments '-DSNX_VARIANT=rus' } }
+        }
+        // универсальный: обе версии игры в одном APK (tools/build.sh android-uni). libmain.so — код английской
+        // (build/gen), libmain_rus.so — русской (из APK rus, build/uni-jni); лаунчер выбирает по файлам игры
+        // (GameVariant.kt, CRC Core.dll — build/uni-assets/variants.txt). Пакет — как у английской: ставится поверх.
+        // Название — res/values(-ru)/strings.xml этого flavor («Spider-Man 2» / «Spider-Man 2» по языку телефона).
+        uni {
+            dimension 'lang'
+            buildConfigField 'String', 'VARIANT', '"uni"'
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path new File(repoRoot, 'CMakeLists.txt')
+            version '3.31.6'
+            buildStagingDirectory new File(repoRoot, 'build/android-cxx')
+        }
+    }
+
+    sourceSets {
+        main {
+            java.srcDirs += sdlJava  // org.libsdl.app.* — из исходников SDL той же версии, что и libSDL2.so
+        }
+        uni {
+            jniLibs.srcDirs += new File(repoRoot, 'build/uni-jni')
+            assets.srcDirs += new File(repoRoot, 'build/uni-assets')
+        }
+    }
+
+    // Подпись — всегда одним ключом, иначе новая версия не ставится поверх старой. По умолчанию — ключ из
+    // репозитория (android/shreknx-release.jks.b64, пароль открыт: подписать «обновление» им может любой — см.
+    // docs/ANDROID.md); свой — android/keystore.properties или переменные SNX_KEYSTORE* (секреты CI).
+    def ksProps = new Properties()
+    def ksFile = new File(projectDir.parentFile, 'keystore.properties')
+    if (System.getenv('SNX_KEYSTORE')) {
+        ksProps['storeFile'] = System.getenv('SNX_KEYSTORE')
+        ksProps['storePassword'] = System.getenv('SNX_KEYSTORE_PASSWORD') ?: ''
+        ksProps['keyAlias'] = System.getenv('SNX_KEY_ALIAS') ?: 'shreknx'
+        ksProps['keyPassword'] = System.getenv('SNX_KEY_PASSWORD') ?: ksProps['storePassword']
+    } else if (ksFile.exists()) {
+        ksFile.withInputStream { ksProps.load(it) }
+    } else {
+        // ключ хранится текстом (base64), чтобы tools/check_public.py не пропускал в репозиторий бинарники
+        def jks = new File(layout.buildDirectory.get().asFile, 'shreknx-release.jks')
+        jks.parentFile.mkdirs()
+        jks.bytes = Base64.mimeDecoder.decode(new File(projectDir.parentFile, 'shreknx-release.jks.b64').text)
+        ksProps['storeFile'] = jks.absolutePath
+        ksProps['storePassword'] = 'shreknx-android'
+        ksProps['keyAlias'] = 'shreknx'
+        ksProps['keyPassword'] = 'shreknx-android'
+    }
+    signingConfigs {
+        snx {
+            def f = new File(ksProps['storeFile'].toString())
+            storeFile f.isAbsolute() ? f : new File(projectDir.parentFile, ksProps['storeFile'].toString())
+            storePassword ksProps['storePassword']
+            keyAlias ksProps['keyAlias']
+            keyPassword ksProps['keyPassword']
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.snx
+        }
+        debug {
+            signingConfig signingConfigs.snx  // тот же ключ: отладочная сборка ставится поверх релизной
+            // сгенерированный код без оптимизаций слишком медленный даже для отладки лаунчера
+            externalNativeBuild { cmake { arguments '-DCMAKE_BUILD_TYPE=Release' } }
+        }
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging false  // .so несжатыми в APK: грузятся прямо из него, быстрее старт
+        }
+    }
+    lint {
+        abortOnError false
+    }
+}

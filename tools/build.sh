@@ -4,10 +4,10 @@
 # switch-pgo — Switch со счётчиками профиля (build/switch-pgo, SNX_PGO=gen). Switch собирается по профилю из
 # build/pgo, если он есть (AGENTS.md, «PGO»; SNX_PGO= — без него): новый профиль (tools/pgo_fetch.py) — с нуля.
 # android — APK через Gradle (docs/ANDROID.md): нужны ANDROID_HOME (SDK с NDK 27 и CMake 3.31.6), JDK 17 и
-# библиотеки из tools/android_deps.sh; результат — build/shrekNX-<eng|rus>.apk.
+# библиотеки из tools/android_deps.sh; результат — build/webheadNX-<eng|rus>.apk.
 # android-uni — универсальный APK с обеими версиями игры (нужны build/gen и build/gen-rus): сначала APK rus, из него
 # libmain.so -> build/uni-jni/arm64-v8a/libmain_rus.so, CRC32 Core.dll обеих копий -> build/uni-assets/variants.txt
-# (по ним лаунчер узнаёт версию игры в папке), затем flavor uni с кодом английской; результат — build/shrekNX-uni.apk.
+# (по ним лаунчер узнаёт версию игры в папке), затем flavor uni с кодом английской; результат — build/webheadNX-uni.apk.
 set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 PLAT=${1:-mac}
@@ -27,7 +27,7 @@ if [ "$PLAT" = android-uni ]; then
   sh "$0" android-rus "$@"
   rm -rf "$ROOT/build/uni-jni" "$ROOT/build/uni-assets"
   mkdir -p "$ROOT/build/uni-jni/arm64-v8a" "$ROOT/build/uni-assets"
-  unzip -p "$ROOT/build/shrekNX-rus.apk" lib/arm64-v8a/libmain.so > "$ROOT/build/uni-jni/arm64-v8a/libmain_rus.so"
+  unzip -p "$ROOT/build/webheadNX-rus.apk" lib/arm64-v8a/libmain.so > "$ROOT/build/uni-jni/arm64-v8a/libmain_rus.so"
   [ -s "$ROOT/build/uni-jni/arm64-v8a/libmain_rus.so" ] || { echo "android-uni: в APK rus нет libmain.so" >&2; exit 1; }
   for v in eng:game/System rus:build/game-rus/System; do
     core=$(find "$ROOT/${v#*:}" -maxdepth 1 -type f -iname core.dll 2>/dev/null | head -1)
@@ -58,8 +58,8 @@ if [ "$PLAT" = android ] || [ "$PLAT" = android-rus ]; then
   "$GRADLE" -p "$ROOT/android" "assemble${FLAVOR}Release" "$@"
   LOWER=$(echo "$FLAVOR" | tr 'A-Z' 'a-z')
   OUT=$(ls "$ROOT/android/app/build/outputs/apk/$LOWER/release/"*.apk | head -1)
-  cp "$OUT" "$ROOT/build/shrekNX-$LOWER.apk"
-  echo "APK: $ROOT/build/shrekNX-$LOWER.apk"
+  cp "$OUT" "$ROOT/build/webheadNX-$LOWER.apk"
+  echo "APK: $ROOT/build/webheadNX-$LOWER.apk"
   exit 0
 fi
 CLEAN=
