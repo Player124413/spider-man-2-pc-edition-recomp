@@ -1,0 +1,24 @@
+{
+  "_comment": "Карта гостевых адресов для PC-версии Spider-Man 2 (Webhead/UE2). Webhead.exe собран без .reloc — только на своей базе 0x00400000, поэтому в гостевой памяти он также размещается по фиксированному адресу. Остальные модули ребейзятся по адресам ниже 0x40000000 (окно гостевой памяти).",
+  "window_size": "0x40000000",
+  "modules": {
+    "msvcr71.dll":  "0x13000000",
+    "Core.dll":     "0x10100000",
+    "Fire.dll":     "0x10500000",
+    "Webhead.dll":  "0x10700000",
+    "webhead.exe":  "0x400000",
+    "Window.dll":   "0x11000000",
+    "WinDrv.dll":   "0x11100000",
+    "Engine.dll":   "0x12000000",
+    "D3DDrv.dll":   "0x12800000",
+    "GUI.dll":      "0x12A00000",
+    "Gameplay.dll": "0x12B00000",
+    "ALAudio.dll":  "0x12C00000"
+  },
+  "regions": {
+    "runtime":   ["0x00010000", "0x00FFFFFF", "TEB/PEB, трамплины HLE-импортов, строки окружения"],
+    "low_alloc": ["0x01000000", "0x0FFFFFFF", "стеки потоков, VirtualAlloc"],
+    "images":    ["0x10000000", "0x1FFFFFFF", "образы модулей"],
+    "heap":      ["0x20000000", "0x3FFFFFFF", "HeapAlloc/VirtualAlloc"]
+  }
+}
