@@ -1,0 +1,75 @@
+name: Source checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  source:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - name: Check publication contents and history
+        run: |
+          python3 -I tests/test_public.py
+          python3 -I tools/check_public.py --history
+      - name: Install build dependencies
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: '1'
+        run: brew install cmake ninja sdl2 libogg libvorbis ffmpeg freetype
+      - name: Install Python dependencies
+        run: |
+          python3 -m venv tools/.venv
+          tools/.venv/bin/python -m pip install -r tools/requirements.txt
+      - name: Check Python sources and recompiler CLI
+        run: |
+          tools/.venv/bin/python -I -m compileall -q recomp tools/recon tools/probe tests tools/check_public.py tools/pgo_fetch.py tools/switch_upload.py tools/test_maps.py
+          tools/.venv/bin/python -I recomp/main.py --help
+          if [ -f tests/test_recomp.py ]; then
+            tools/.venv/bin/python -I tests/test_recomp.py
+          fi
+      - name: Build without game files
+        run: tools/build.sh mac
+      - name: Test runtime with synthetic data
+        run: ctest --test-dir build/mac --output-on-failure
+      - name: Build and test with ASan/UBSan
+        run: |
+          cmake -S . -B build/mac-san -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo "-DSNX_SANITIZE=address;undefined"
+          cmake --build build/mac-san
+          ctest --test-dir build/mac-san --output-on-failure
+
+  linux-arm64:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build pkg-config \
+            libsdl2-dev libgl-dev libopenal-dev libvorbis-dev \
+            libavcodec-dev libavutil-dev libfreetype-dev
+      - name: Check Python sources
+        run: python3 -I -m compileall -q recomp tools/recon tools/probe tests tools/check_public.py tools/pgo_fetch.py tools/switch_upload.py tools/test_maps.py
+      - name: Build without game files (ARM64 GCC, SNX_PIN=ON)
+        run: |
+          cmake -S . -B build/linux-arm64 -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DSNX_PIN=ON
+          cmake --build build/linux-arm64
+      - name: Test runtime with synthetic data
+        run: ctest --test-dir build/linux-arm64 --output-on-failure
