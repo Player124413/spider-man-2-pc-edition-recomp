@@ -36,6 +36,10 @@ object GameVariant {
 
     fun detect(ctx: Context, gameDir: String): Result {
         val sys = GameFolder.child(File(gameDir), "System") ?: return Result(null, "no System")
+        // PE-модули у английской и русской локализации Spider-Man 2 одинаковые (CRC и дата не помогут):
+        // язык определяем по System/Startup.int (в русской копии он в UTF-16 и содержит кириллицу).
+        val lang = detectLanguage(sys)
+        if (lang != null) return Result(lang, "Startup.int: ${if (lang == RUS) "ru" else "en"}")
         val core = GameFolder.child(sys, "Core.dll") ?: return Result(null, "no Core.dll")
         val key = "${core.absolutePath}:${core.length()}:${core.lastModified()}"
         synchronized(this) {
@@ -78,6 +82,34 @@ object GameVariant {
             // нет файла (сборка без игры или не универсальная) — только по дате PE
         }
         return m
+    }
+
+    // null — не удалось определить; иначе RUS/ENG по признакам кириллицы в Start/Subtitles .int
+    private fun detectLanguage(sys: File): String? {
+        for (name in listOf("Startup.int", "Webhead.int", "Subtitles.int")) {
+            val f = GameFolder.child(sys, name) ?: continue
+            val b = try { f.readBytes() } catch (e: Exception) { continue }
+            if (b.isEmpty()) continue
+            var cyr = 0
+            var latin = 0
+            if (b[0] == 0xFF.toByte() && b.getOrNull(1) == 0xFE.toByte()) {
+                var i = 2
+                while (i + 1 < b.size) {
+                    val u = (b[i].toInt() and 0xFF) or ((b[i + 1].toInt() and 0xFF) shl 8)
+                    if (u in 0x0410..0x044F || u == 0x0401 || u == 0x0451) cyr++
+                    else if (u in 0x41..0x7A) latin++
+                    i += 2
+                }
+            } else {
+                for (v in b) {
+                    if (v in 0xC0..0xFF || v == 0xA8 || v == 0xB8) cyr++
+                    else if (v in 0x41..0x7A) latin++
+                }
+            }
+            if (cyr > 8 && cyr > latin / 4) return RUS
+            if (latin > 8 && cyr == 0) return ENG
+        }
+        return null
     }
 
     private fun crc32(f: File): Long {

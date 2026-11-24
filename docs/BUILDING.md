@@ -168,17 +168,18 @@ tools/build.sh android        # или android-rus
 
 ## Русская версия
 
-DLL локализации «Новый Диск» от 2004-12-13 отличаются от английских, поэтому нужна отдельная генерация. Скрипту передаются каталог установленной русской игры и совместимый распакованный английский launcher из своей копии:
+В Spider-Man 2 PC русская локализация — это `.int`-файлы в `System` (например, `Startup.int` в UTF-16
+с кириллицей), а PE-модули (`Webhead.exe`, `Core.dll` и т. д.) те же, что и в английской копии. Отдельной
+генерации `build/gen-rus` не требуется: `cmake/gen.cmake` при `SNX_VARIANT=rus` берёт общий `build/gen`.
+Язык определяется по содержимому `.int`, настройки и сохранения пишутся в отдельный каталог `user-rus`.
 
 ```sh
-tools/make_rus.sh Shrek2RUS game/System/game.exe
-tools/.venv/bin/python -I recomp/main.py gen --game build/game-rus/System --out build/gen-rus
-tools/build.sh mac-rus snx_boot
-build/mac-rus/host/boot/snx_boot
-tools/build.sh switch-rus snx_boot_nro
+tools/build.sh android-rus       # -> build/webheadNX-rus.apk (или mac-rus / switch-rus)
+tools/build.sh android-uni       # обе локализации в одном APK
 ```
 
-`tools/make_rus.sh` пересоздаёт только `build/game-rus`. Исходная русская игра не меняется. На Switch используйте `build/switch-rus/host/boot/snx_boot.nro` и данные из `build/game-rus/` в `sdmc:/switch/shrek2rus/game/`. Настройки пишутся в `shrek2rus/user/`.
+В Android-лаунчере универсальной сборки вариант определяется по `System/Startup.int`: CRC и дата модулей
+у обеих локализаций одинаковые, поэтому сравнение `Core.dll` не используется как основной признак.
 
 ## Частые проблемы
 

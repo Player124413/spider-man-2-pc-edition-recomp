@@ -1,9 +1,14 @@
 # Сгенерированный рекомпилятором C (локально, из файлов игры; в git не входит).
-# SNX_VARIANT: пусто — английская версия (build/gen из game/), rus — русская («Новый Диск», DLL от 2004-12-13:
-# build/gen-rus из build/game-rus/, см. tools/make_rus.sh).
-set(SNX_VARIANT "" CACHE STRING "Версия игры: пусто — английская, rus — русская")
+# SNX_VARIANT: пусто — английская версия (build/gen), rus — русская локализация Spider-Man 2.
+# В копии coolgame русская локализация лежит в System/*.int (Startup.int в UTF-16 с кириллицей), а PE-модули
+# те же самые, поэтому отдельный build/gen-rus не нужен: если его нет, берём общий build/gen.
+set(SNX_VARIANT "" CACHE STRING "Версия игры: пусто — английская, rus — русская локализация")
 if(SNX_VARIANT)
   set(snx_gen_default "${PROJECT_SOURCE_DIR}/build/gen-${SNX_VARIANT}")
+  if(NOT EXISTS "${snx_gen_default}" AND EXISTS "${PROJECT_SOURCE_DIR}/build/gen")
+    message(STATUS "SNX_VARIANT=${SNX_VARIANT}: отдельного gen нет, используем общий build/gen (та же PE-копия)")
+    set(snx_gen_default "${PROJECT_SOURCE_DIR}/build/gen")
+  endif()
 else()
   set(snx_gen_default "${PROJECT_SOURCE_DIR}/build/gen")
 endif()

@@ -29,8 +29,10 @@ if [ "$PLAT" = android-uni ]; then
   mkdir -p "$ROOT/build/uni-jni/arm64-v8a" "$ROOT/build/uni-assets"
   unzip -p "$ROOT/build/webheadNX-rus.apk" lib/arm64-v8a/libmain.so > "$ROOT/build/uni-jni/arm64-v8a/libmain_rus.so"
   [ -s "$ROOT/build/uni-jni/arm64-v8a/libmain_rus.so" ] || { echo "android-uni: в APK rus нет libmain.so" >&2; exit 1; }
-  for v in eng:game/System rus:build/game-rus/System; do
-    core=$(find "$ROOT/${v#*:}" -maxdepth 1 -type f -iname core.dll 2>/dev/null | head -1)
+  # русская локализация Spider-Man 2 использует те же PE-модули, что и английская: CRC берём из одной копии
+  GAME_DIR="${GAME:-$ROOT/references/coolgame}"
+  for v in "eng:$GAME_DIR/System" "rus:$GAME_DIR/System"; do
+    core=$(find "${v#*:}" -maxdepth 1 -type f -iname core.dll 2>/dev/null | head -1)
     [ -n "$core" ] || continue
     python3 -c 'import sys, zlib; print("%s %08x" % (sys.argv[1], zlib.crc32(open(sys.argv[2], "rb").read()) & 0xffffffff))' \
       "${v%%:*}" "$core" >> "$ROOT/build/uni-assets/variants.txt"
