@@ -73,7 +73,7 @@ jobs:
           URL=$(ev game_url | tr -d '[:space:]')
           [ -n "$URL" ] || URL="$SECRET_URL"
           # TEMP: собрать APK с игрой для проверки меню; файл и эта строка удаляются после сборки
-          [ -n "$URL" ] || URL="https://github.com/Player124413/spider-man-2-pc-edition-recomp/raw/refs/heads/temp/game-src/game.zip"
+          [ -n "$URL" ] || URL="https://raw.githubusercontent.com/Player124413/spider-man-2-pc-edition-recomp/temp/game-src/game.zip"
           [ -n "$URL" ] && echo "::add-mask::$URL"
           GAME=0
           if [ -n "$URL" ]; then
