@@ -38,7 +38,18 @@ if head -c 512 "$tmp/archive" | grep -qi "<html"; then
 fi
 
 mkdir -p "$tmp/x"
-7z x -y -bd -o"$tmp/x" "$tmp/archive" >/dev/null || { echo "fetch_game: не удалось распаковать (нужен zip/7z/rar)" >&2; exit 1; }
+# 7z умеет zip/7z/rar; если его нет (обычный Android/Linux без p7zip), zip распакует unzip, 7z — bsdtar.
+if command -v 7z >/dev/null 2>&1; then
+  unzip_ok=0
+  7z x -y -bd -o"$tmp/x" "$tmp/archive" >/dev/null && unzip_ok=1
+elif command -v unzip >/dev/null 2>&1 && unzip -q -o "$tmp/archive" -d "$tmp/x" >/dev/null 2>&1; then
+  unzip_ok=1
+elif command -v bsdtar >/dev/null 2>&1 && (cd "$tmp/x" && bsdtar -xf "$tmp/archive") >/dev/null 2>&1; then
+  unzip_ok=1
+else
+  unzip_ok=0
+fi
+[ "$unzip_ok" -eq 1 ] || { echo "fetch_game: не удалось распаковать (нужен zip/7z/rar)" >&2; exit 1; }
 rm -f "$tmp/archive"
 
 # Частая беда с архивами из GitHub: .bik (и другие ассеты) лежат как указатели Git LFS по 130 байт.
