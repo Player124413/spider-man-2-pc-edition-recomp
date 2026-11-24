@@ -1,4 +1,4 @@
-package com.shreknx.game
+package com.webheadnx.game
 
 // JNI к libmain.so (host/boot/android.c -> host/boot/touch.h). Только в процессе игры (:game), после загрузки
 // библиотек SDLActivity.

@@ -1,4 +1,4 @@
-package com.shreknx.game
+package com.webheadnx.game
 
 import android.content.Context
 import android.content.res.ColorStateList
@@ -16,12 +16,12 @@ import android.widget.TextView
 
 // Интерфейс лаунчера и редактора — кодом, без XML-разметки (меньше файлов, всё в одном стиле).
 object Ui {
-    const val BG = 0xFF10140C.toInt()
-    const val CARD = 0xFF1C2414.toInt()
-    const val ACCENT = 0xFF8DC63F.toInt()
-    const val ACCENT_DARK = 0xFF5E8A22.toInt()
-    const val TEXT = 0xFFEFF5E6.toInt()
-    const val DIM = 0xFF9DAA8E.toInt()
+    const val BG = 0xFF0B1020.toInt()
+    const val CARD = 0xFF121B2E.toInt()
+    const val ACCENT = 0xFFE62429.toInt()
+    const val ACCENT_DARK = 0xFF8C101C.toInt()
+    const val TEXT = 0xFFF2F5FF.toInt()
+    const val DIM = 0xFF9FACC4.toInt()
 
     fun dp(ctx: Context, v: Float) = (v * ctx.resources.displayMetrics.density + 0.5f).toInt()
 
@@ -66,8 +66,8 @@ object Ui {
         text = s
         isAllCaps = false
         textSize = if (primary) 18f else 14f
-        setTextColor(if (primary) 0xFF10140C.toInt() else TEXT)
-        background = rounded(if (primary) ACCENT else 0xFF2B3720.toInt(), dp(ctx, 12f).toFloat())
+        setTextColor(if (primary) 0xFFFFFFFF.toInt() else TEXT)
+        background = rounded(if (primary) ACCENT else 0xFF1B2947.toInt(), dp(ctx, 12f).toFloat())
         val ph = dp(ctx, 16f)
         val pv = dp(ctx, if (primary) 14f else 8f)
         setPadding(ph, pv, ph, pv)
@@ -125,8 +125,8 @@ object Ui {
         val views = ArrayList<TextView>()
         fun paint(sel: Int) {
             for ((i, v) in views.withIndex()) {
-                v.background = rounded(if (i == sel) ACCENT else 0xFF2B3720.toInt(), dp(ctx, 18f).toFloat())
-                v.setTextColor(if (i == sel) 0xFF10140C.toInt() else TEXT)
+                v.background = rounded(if (i == sel) ACCENT else 0xFF1B2947.toInt(), dp(ctx, 18f).toFloat())
+                v.setTextColor(if (i == sel) 0xFFFFFFFF.toInt() else TEXT)
             }
         }
         for ((i, o) in options.withIndex()) {

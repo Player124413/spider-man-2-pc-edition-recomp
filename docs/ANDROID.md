@@ -31,7 +31,7 @@ adb install -r build/webheadNX.apk
 
 ## Папка игры и настройки
 
-Лаунчер ищет игру в `Android/data/com.shreknx.game/files/game` (можно импортировать папку через SAF).
+Лаунчер ищет игру в `Android/data/com.webheadnx.game/files/game` (можно импортировать папку через SAF).
 В `System` должны быть `Webhead.exe`, `Core.dll`, `Engine.dll`, `WinDrv.dll`, `D3DDrv.dll` и остальные
 12 модулей из `recomp/addrmap.json`, плюс `Maps/`, `Textures/`, `Sounds/`, `Music/`, `Movies/`.
 `Webhead.exe` должен быть распакованным (без SafeDisc-секций `stxt*`).
@@ -47,6 +47,14 @@ adb install -r build/webheadNX.apk
 * быстрое меню порта — ZL+Plus (масштаб, FPS, звук, выход).
 
 Читы из Shrek 2 в этот порт не перенесены: соответствующие команды относятся к другому движку.
+
+## Сосуществование со Shrek 2
+
+APK Spider-Man 2 использует отдельный `applicationId` (`com.webheadnx.game`) и отдельный ключ подписи
+(`android/webhead2-release.p12.b64`, алиас `webhead2`), поэтому Shrek 2 (`com.shreknx.game`) не нужно удалять:
+приложения ставятся рядом. Имя пакета и подпись нельзя менять в обновлениях — иначе Android расценит APK как другое
+приложение, и сохранения/настройки не перенесутся. Иконка, лаунчер и экранное управление оформлены в красно-синей
+стилистике Spider-Man (векторная маска, паутина, белые глаза на кнопках).
 
 ## CI
 

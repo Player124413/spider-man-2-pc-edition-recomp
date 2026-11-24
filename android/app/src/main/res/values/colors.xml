@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="snx_bg">#FF10140C</color>
-    <color name="snx_card">#FF1C2414</color>
-    <color name="snx_accent">#FF8DC63F</color>
-    <color name="snx_accent_dark">#FF5E8A22</color>
-    <color name="snx_text">#FFEFF5E6</color>
-    <color name="snx_text_dim">#FF9DAA8E</color>
-    <color name="ic_launcher_background">#FF3F6B1B</color>
+    <color name="snx_bg">#FF0B1020</color>
+    <color name="snx_card">#FF121B2E</color>
+    <color name="snx_accent">#FFE62429</color>
+    <color name="snx_accent_dark">#FF8C101C</color>
+    <color name="snx_text">#FFF2F5FF</color>
+    <color name="snx_text_dim">#FF9FACC4</color>
+    <color name="ic_launcher_background">#FFB01524</color>
 </resources>

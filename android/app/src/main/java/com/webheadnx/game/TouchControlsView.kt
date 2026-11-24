@@ -1,4 +1,4 @@
-package com.shreknx.game
+package com.webheadnx.game
 
 import android.annotation.SuppressLint
 import android.content.Context
@@ -101,8 +101,8 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
                     Kind.DPAD -> drawDpad(canvas, c, a)
                 }
                 if (editMode && c === selected) {
-                    ring.color = 0xFFFFD54F.toInt()
-                    canvas.drawCircle(cx(c), cy(c), radius(c) + 6f * density, dashed.apply { color = 0xFFFFD54F.toInt() })
+                    ring.color = 0xFFE62429.toInt()
+                    canvas.drawCircle(cx(c), cy(c), radius(c) + 6f * density, dashed.apply { color = 0xFFE62429.toInt() })
                 }
                 if (editMode && !c.visible) {
                     dashed.color = 0x99FFFFFF.toInt()
@@ -114,7 +114,7 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
     }
 
     private fun drawGrid(canvas: Canvas) {
-        canvas.drawColor(0xFF1A2212.toInt())
+        canvas.drawColor(0xFF0B1633.toInt())
         var i = 1
         while (i < 20) {
             val x = w() * i / 20f
@@ -127,12 +127,12 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
 
     private fun alpha(a: Float) = (a.coerceIn(0f, 1f) * 255).toInt()
 
-    // кнопки и стики — значки в стиле Шрека (ShrekIcons: SVG-пути, уши огра); у кнопок без значка — надпись
+    // кнопки и стики — значки в стиле Шрека (WebIcons: SVG-пути, уши огра); у кнопок без значка — надпись
     private fun drawButton(canvas: Canvas, c: Control, a: Float) {
         val pressed = isPressed(c)
         val potion = if (c.id == POTION_ID) PotionIcons.get(settings.potionSlot) else null
         val al = alpha(if (pressed) min(1f, a * 1.2f) else a)
-        ShrekIcons.drawButton(canvas, cx(c), cy(c), radius(c), if (potion != null) null else ShrekIcons.iconFor(c.id),
+        WebIcons.drawButton(canvas, cx(c), cy(c), radius(c), if (potion != null) null else WebIcons.iconFor(c.id),
             if (potion != null) "" else c.label, pressed, c.toggle && c.id in latched, al)
         if (potion != null) drawPotion(canvas, c, potion, pressed, al)
         if (c.id == POTION_ID) drawSlot(canvas, c, a)
@@ -162,8 +162,8 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
         val r = radius(c)
         val y = cy(c)
         for (dir in intArrayOf(-1, 1))
-            ShrekIcons.drawArrow(canvas, slotArrowX(c, dir), y, slotArrowR(c), dir < 0, slotFlash == dir, alpha(a))
-        ShrekIcons.drawBadge(canvas, cx(c) + r * 0.8f, y + r * 0.8f, r * 0.36f, settings.potionSlot.toString(), alpha(min(1f, a * 1.3f)))
+            WebIcons.drawArrow(canvas, slotArrowX(c, dir), y, slotArrowR(c), dir < 0, slotFlash == dir, alpha(a))
+        WebIcons.drawBadge(canvas, cx(c) + r * 0.8f, y + r * 0.8f, r * 0.36f, settings.potionSlot.toString(), alpha(min(1f, a * 1.3f)))
         // после смены слота — название зелья над кнопкой (1,5 с)
         val left = slotNameUntil - android.os.SystemClock.uptimeMillis()
         if (left > 0 && !editMode) {
@@ -173,11 +173,11 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
                 val ty = y - r * 1.25f
                 nameText.style = Paint.Style.STROKE
                 nameText.strokeWidth = 3.5f * density
-                nameText.color = ShrekIcons.SWAMP
+                nameText.color = WebIcons.SWAMP
                 nameText.alpha = (fade * 230).toInt()
                 canvas.drawText(name, cx(c), ty, nameText)
                 nameText.style = Paint.Style.FILL
-                nameText.color = ShrekIcons.CREAM
+                nameText.color = WebIcons.CREAM
                 nameText.alpha = (fade * 255).toInt()
                 canvas.drawText(name, cx(c), ty, nameText)
                 postInvalidateDelayed(if (left > 300) left - 300 else 30)
@@ -214,7 +214,7 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
         val r = radius(c)
         val kx = bx + (st?.vx ?: 0f) * r * 0.6f
         val ky = by + (st?.vy ?: 0f) * r * 0.6f
-        ShrekIcons.drawStick(canvas, bx, by, r, kx, ky, activeNow, a)
+        WebIcons.drawStick(canvas, bx, by, r, kx, ky, activeNow, a)
     }
 
     private fun drawDpad(canvas: Canvas, c: Control, a: Float) {
@@ -225,10 +225,10 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
             canvas.rotate(90f * i, x, y)
             rect.set(x - t, y - r, x + t, y - t * 0.6f)
             val on = dpadMask and (1 shl bit) != 0
-            fill.color = if (on) 0x8DC63F else 0x16210A
+            fill.color = if (on) 0xE62429 else 0x0B1633
             fill.alpha = alpha(if (on) a * 0.9f else a * 0.55f)
             canvas.drawRoundRect(rect, t * 0.4f, t * 0.4f, fill)
-            ring.color = 0x8DC63F
+            ring.color = 0xE62429
             ring.alpha = alpha(a)
             canvas.drawRoundRect(rect, t * 0.4f, t * 0.4f, ring)
             path.reset()
@@ -236,7 +236,7 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
             path.lineTo(x - t * 0.45f, y - r * 0.62f)
             path.lineTo(x + t * 0.45f, y - r * 0.62f)
             path.close()
-            fill.color = if (on) 0x1B2A0B else 0xF2EBC9
+            fill.color = if (on) 0x0B1633 else 0xFFFFFF
             fill.alpha = alpha(a)
             canvas.drawPath(path, fill)
             canvas.restore()

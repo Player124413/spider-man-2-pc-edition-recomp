@@ -1,4 +1,4 @@
-// Приложение: лаунчер (com.shreknx.game.LauncherActivity) и игра (GameActivity — SDLActivity в отдельном
+// Приложение: лаунчер (com.webheadnx.game.LauncherActivity) и игра (GameActivity — SDLActivity в отдельном
 // процессе). Нативная часть — корневой CMakeLists.txt (ANDROID: cmake/android.cmake): libSDL2.so + libmain.so
 // со сгенерированным кодом из build/gen. Один APK на обе локализации: eng/rus различаются только файлами
 // игры (System/*.int), лаунчер определяет язык сам, отдельных flavor'ов нет.
@@ -32,12 +32,12 @@ def snxCommitMinutes = Math.max(1000L, (git(['log', '-1', '--format=%ct'], 0) - 
 def snxVersionCode = project.hasProperty('snx.versionCode') ? project.property('snx.versionCode').toString().toInteger() : (snxCommitMinutes as int)
 
 android {
-    namespace 'com.shreknx.game'
+    namespace 'com.webheadnx.game'
     compileSdk 35
     ndkVersion '27.2.12479018'
 
     defaultConfig {
-        applicationId 'com.shreknx.game'
+        applicationId 'com.webheadnx.game'
         minSdk 24          // Android 7.0: OpenGL ES 3.0 есть везде, AAudio — с 8.1 (иначе OpenSL ES)
         targetSdk 35
         versionCode snxVersionCode
@@ -68,32 +68,37 @@ android {
         }
     }
 
-    // Подпись — всегда одним ключом, иначе новая версия не ставится поверх старой. По умолчанию — ключ из
-    // репозитория (android/shreknx-release.jks.b64, пароль открыт: подписать «обновление» им может любой — см.
-    // docs/ANDROID.md); свой — android/keystore.properties или переменные SNX_KEYSTORE* (секреты CI).
+    // Подпись — своим ключом, отличным от ключа Shrek 2: приложение ставится рядом с com.shreknx.game, а не
+    // вместо него. По умолчанию — ключ из репозитория (android/webhead2-release.p12.b64, пароль открыт: подписать
+    // «обновление» им может любой — см. docs/ANDROID.md); свой — android/keystore.properties или переменные
+    // SNX_KEYSTORE* (секреты CI). Не меняйте ключ/пакет в обновлениях, иначе Android не заменит старую версию.
     def ksProps = new Properties()
     def ksFile = new File(projectDir.parentFile, 'keystore.properties')
     if (System.getenv('SNX_KEYSTORE')) {
         ksProps['storeFile'] = System.getenv('SNX_KEYSTORE')
         ksProps['storePassword'] = System.getenv('SNX_KEYSTORE_PASSWORD') ?: ''
-        ksProps['keyAlias'] = System.getenv('SNX_KEY_ALIAS') ?: 'shreknx'
+        ksProps['storeType'] = System.getenv('SNX_KEYSTORE_TYPE') ?: 'PKCS12'
+        ksProps['keyAlias'] = System.getenv('SNX_KEY_ALIAS') ?: 'webhead2'
         ksProps['keyPassword'] = System.getenv('SNX_KEY_PASSWORD') ?: ksProps['storePassword']
     } else if (ksFile.exists()) {
         ksFile.withInputStream { ksProps.load(it) }
     } else {
         // ключ хранится текстом (base64), чтобы tools/check_public.py не пропускал в репозиторий бинарники
-        def jks = new File(layout.buildDirectory.get().asFile, 'shreknx-release.jks')
-        jks.parentFile.mkdirs()
-        jks.bytes = Base64.mimeDecoder.decode(new File(projectDir.parentFile, 'shreknx-release.jks.b64').text)
-        ksProps['storeFile'] = jks.absolutePath
-        ksProps['storePassword'] = 'shreknx-android'
-        ksProps['keyAlias'] = 'shreknx'
-        ksProps['keyPassword'] = 'shreknx-android'
+        def p12 = new File(layout.buildDirectory.get().asFile, 'webhead2-release.p12')
+        p12.parentFile.mkdirs()
+        p12.bytes = Base64.mimeDecoder.decode(new File(projectDir.parentFile, 'webhead2-release.p12.b64').text)
+        ksProps['storeFile'] = p12.absolutePath
+        ksProps['storeType'] = 'PKCS12'
+        ksProps['storePassword'] = 'webhead2-android'
+        ksProps['keyAlias'] = 'webhead2'
+        ksProps['keyPassword'] = 'webhead2-android'
     }
     signingConfigs {
         snx {
             def f = new File(ksProps['storeFile'].toString())
             storeFile f.isAbsolute() ? f : new File(projectDir.parentFile, ksProps['storeFile'].toString())
+            def fType = ksProps['storeType'] ?: (f.name.toLowerCase().endsWith('.p12') || f.name.toLowerCase().endsWith('.pfx') ? 'PKCS12' : 'JKS')
+            storeType fType
             storePassword ksProps['storePassword']
             keyAlias ksProps['keyAlias']
             keyPassword ksProps['keyPassword']

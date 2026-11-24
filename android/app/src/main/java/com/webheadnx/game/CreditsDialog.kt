@@ -1,4 +1,4 @@
-package com.shreknx.game
+package com.webheadnx.game
 
 import android.app.Activity
 import android.app.Dialog
@@ -258,31 +258,22 @@ object CreditsDialog {
             // кайма (тёмная) со свечением
             p.shader = null
             p.style = Paint.Style.FILL
-            p.color = 0xFF0B1007.toInt()
-            p.setShadowLayer(6f * density, 0f, 0f, 0x998DC63F.toInt())
+            p.color = 0xFF0B1633.toInt()
+            p.setShadowLayer(6f * density, 0f, 0f, 0x99E62429.toInt())
             canvas.drawRoundRect(rect, rr, rr, p)
             p.clearShadowLayer()
             val inset = 2.5f * density
             rect.inset(inset, inset)
-            p.shader = LinearGradient(rect.left, rect.top, rect.right, rect.bottom, 0xFFA6D650.toInt(), 0xFF5E8A22.toInt(), Shader.TileMode.CLAMP)
+            p.shader = LinearGradient(rect.left, rect.top, rect.right, rect.bottom,
+                0xFFE62429.toInt(), 0xFF8C101C.toInt(), Shader.TileMode.CLAMP)
             canvas.drawRoundRect(rect, rr - inset, rr - inset, p)
             p.shader = null
-            // голова огра силуэтом: уши и круг — тёмные, лицо — вырезом цвета значка
+            // маска паука: синий круг, красная паутина, белые глаза
             val s = rect.width() * 0.0058f
             canvas.save()
             canvas.translate(rect.centerX() - 50f * s, rect.centerY() - 46f * s)
             canvas.scale(s, s)
-            val ink = 0xFF0E1508.toInt()
-            ShrekIcons.drawEars(canvas, 52f, ink, ink, ink)
-            p.color = ink
-            canvas.drawCircle(50f, 50f, 40f, p)
-            p.color = 0xFF86BC38.toInt()
-            canvas.drawCircle(38f, 48f, 6f, p)
-            canvas.drawCircle(62f, 48f, 6f, p)
-            p.style = Paint.Style.STROKE
-            p.strokeWidth = 5.5f
-            p.strokeCap = Paint.Cap.ROUND
-            canvas.drawArc(RectF(33f, 52f, 67f, 74f), 20f, 140f, false, p)
+            WebIcons.drawHead(canvas, 50f, 50f, 40f, 255, true)
             canvas.restore()
         }
     }

@@ -1,4 +1,4 @@
-package com.shreknx.game
+package com.webheadnx.game
 
 import android.graphics.Canvas
 import android.graphics.Color
@@ -7,12 +7,10 @@ import android.graphics.Path
 import android.graphics.RadialGradient
 import android.graphics.Shader
 
-// Значки экранного управления «в стиле Шрека»: болотно-зелёная кнопка с ушами-трубочками огра и кремовым значком.
-// Значки — SVG-пути (SvgPath) в квадрате 100x100: круг кнопки — центр (50, 50), радиус 40 (уши выступают за него
-// вверх, касание по-прежнему ловится кругом). Те же пути можно открыть как SVG (<svg viewBox="-10 -10 120 120">)
-// и поправить в любом редакторе. Рисуется в координатах квадрата: canvas.translate + scale, пути и шейдеры
-// создаются один раз.
-object ShrekIcons {
+// Значки экранного управления в стилистике Spider-Man: красная паутина, синяя маска, белые глаза.
+// Значки — SVG-пути (SvgPath) в квадрате 100x100: круг кнопки — центр (50, 50), радиус 40. Те же пути
+// можно открыть как SVG (<svg viewBox="-10 -10 120 120">) и поправить в любом редакторе.
+object WebIcons {
     private enum class Mode { FILL, LINE, CUT, CUTFILL }
     private class El(val mode: Mode, val path: Path, val width: Float = 2f)
 
@@ -21,25 +19,27 @@ object ShrekIcons {
     private fun cut(d: String, w: Float) = El(Mode.CUT, SvgPath.parse(d), w)
     private fun cutFill(d: String) = El(Mode.CUTFILL, SvgPath.parse(d))
 
-    // ухо огра: трубочка вверх с раструбом, основание под ободом кнопки; поворачивается на ±40° вокруг центра
-    private val EAR = SvgPath.parse("M43.5 16 C44.5 11 45.5 6 45.5 2 C42.5 0.5 40.5 -2.5 41 -5.5 C45.5 -8 54.5 -8 59 -5.5 " +
-        "C59.5 -2.5 57.5 0.5 54.5 2 C54.5 6 55.5 11 56.5 16 Z")
-    private val EAR_HOLE = SvgPath.parse("M44.5 -5 C48 -6.8 52 -6.8 55.5 -5 C52 -3.4 48 -3.4 44.5 -5 Z")
+    // паутина поверх круга: радиальные нити и дуги между ними
+    private val WEB_SPOKES = SvgPath.parse(
+        "M50 50 L50 10 M50 50 L75 14 M50 50 L86 40 M50 50 L86 66 M50 50 L72 86 " +
+        "M50 50 L28 86 M50 50 L14 66 M50 50 L14 40 M50 50 L25 14")
+    private val WEB_RINGS = SvgPath.parse(
+        "M35 22 Q50 28 65 22 M22 34 Q50 44 78 34 M18 50 Q50 62 82 50 M24 68 Q50 80 76 68")
 
     // значки по id элемента раскладки (TouchLayout); у остальных — надпись
     private val ICONS: Map<String, List<El>> by lazy {
         mapOf(
-            // удар — кулак огра
+            // удар — кулак
             "attack" to listOf(
                 fill("M31 47 C31 41 35 38 39.5 39.5 C40.5 35 45.5 33.5 49 36 C51 32.5 56.5 32.5 58.5 36.5 C62 34.5 67 36.5 " +
                     "67.5 41.5 C70 42.5 71 45 71 48 L71 58 C71 67 64.5 73 56 73 L46 73 C37 73 31 67 31 58 Z"),
                 cut("M40 41 L40 50 M49.5 38 L49.5 49 M58.5 39 L58.5 49", 3f),
                 cut("M31 53 C38 50 45 51 50 55 C47 59 42 61 37 61", 3f)),
-            // прыжок — стрелка вверх над землёй
+            // прыжок — стрелка вверх
             "jump" to listOf(
                 fill("M50 22 L72 46 L59 46 L59 63 L41 63 L41 46 L28 46 Z"),
                 fill("M35 69 L65 69 C67.5 69 67.5 76 65 76 L35 76 C32.5 76 32.5 69 35 69 Z")),
-            // зелья — колба с волной зелья и бликом
+            // зелья — колба с волной
             "potion" to listOf(
                 fill("M43 22 L57 22 C58.5 22 58.5 28 57 28 L55 28 L55 37 C64.5 40 71 48.5 71 58 C71 69.5 61.5 77 50 77 " +
                     "C38.5 77 29 69.5 29 58 C29 48.5 35.5 40 45 37 L45 28 L43 28 C41.5 28 41.5 22 43 22 Z"),
@@ -55,7 +55,6 @@ object ShrekIcons {
         )
     }
 
-    // id раскладки -> значок
     fun iconFor(id: String): String? = when (id) {
         "a" -> "attack"
         "b" -> "jump"
@@ -67,18 +66,19 @@ object ShrekIcons {
         else -> null
     }
 
-    // цвета: огр, болото, крем (рубаха Шрека)
-    const val OGRE = 0xFF8DC63F.toInt()
-    const val OGRE_LIGHT = 0xFFB5E05A.toInt()
-    const val OGRE_DARK = 0xFF2C4010.toInt()
-    const val SWAMP = 0xFF16210A.toInt()
-    const val CREAM = 0xFFF2EBC9.toInt()
-    private const val EAR_HOLE_COLOR = 0xFF3A5216.toInt()
-    private const val PRESSED_EDGE = 0xFF6E9E26.toInt()
-    private const val PRESSED_INK = 0xFF1B2A0B.toInt()
+    // цвета маски: красный паук, синий костюм, тёмный фон, белые глаза
+    const val RED = 0xFFE62429.toInt()
+    const val BLUE = 0xFF2451A8.toInt()
+    const val NAVY = 0xFF0B1633.toInt()
+    const val INK = 0xFFFFFFFF.toInt()
+    // совместимость со старыми вызовами (TouchControlsView)
+    const val SWAMP = NAVY
+    const val CREAM = INK
+    private const val RED_DARK = 0xFF8C101C.toInt()
+    private const val PRESSED_INK = 0xFF0B1633.toInt()
 
-    private val baseShader = RadialGradient(50f, 40.4f, 49.6f, 0xFF3F5C1C.toInt(), SWAMP, Shader.TileMode.CLAMP)
-    private val pressedShader = RadialGradient(50f, 40.4f, 49.6f, OGRE_LIGHT, PRESSED_EDGE, Shader.TileMode.CLAMP)
+    private val baseShader = RadialGradient(50f, 40.4f, 49.6f, BLUE, NAVY, Shader.TileMode.CLAMP)
+    private val pressedShader = RadialGradient(50f, 40.4f, 49.6f, RED, RED_DARK, Shader.TileMode.CLAMP)
 
     private val pFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
     private val pStroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -91,26 +91,21 @@ object ShrekIcons {
         isFakeBoldText = true
     }
 
-    // уши огра в координатах квадрата 100x100 вокруг круга (cx, cy) радиуса 40
-    fun drawEars(canvas: Canvas, angle: Float = 40f, fill: Int = OGRE, outline: Int = OGRE_DARK, hole: Int = EAR_HOLE_COLOR) {
-        for (a in floatArrayOf(-angle, angle)) {
-            canvas.save()
-            canvas.rotate(a, 50f, 50f)
-            pFill.shader = null
-            pFill.color = fill
-            canvas.drawPath(EAR, pFill)
-            pStroke.color = outline
-            pStroke.strokeWidth = 2f
-            canvas.drawPath(EAR, pStroke)
-            pFill.color = hole
-            canvas.drawPath(EAR_HOLE, pFill)
-            canvas.restore()
-        }
+    // паутина вместо «ушей»: тонкие красные нити поверх кнопки
+    fun drawWeb(canvas: Canvas, angle: Float = 0f, color: Int = RED) {
+        canvas.save()
+        canvas.rotate(angle, 50f, 50f)
+        pFill.shader = null
+        pStroke.color = color
+        pStroke.strokeWidth = 1.6f
+        canvas.drawPath(WEB_SPOKES, pStroke)
+        pStroke.strokeWidth = 1.3f
+        canvas.drawPath(WEB_RINGS, pStroke)
+        canvas.restore()
     }
 
     private fun begin(canvas: Canvas, x: Float, y: Float, r: Float, alpha: Int): Int {
         val s = r / 40f
-        // слой — чтобы прозрачность была общей (основания ушей не просвечивали сквозь круг)
         val save = canvas.saveLayerAlpha(x - r * 1.5f, y - r * 1.5f, x + r * 1.5f, y + r * 1.2f, alpha.coerceIn(0, 255))
         canvas.translate(x - 50f * s, y - 50f * s)
         canvas.scale(s, s)
@@ -122,24 +117,24 @@ object ShrekIcons {
                    latched: Boolean, alpha: Int) {
         if (r <= 0f) return
         val save = begin(canvas, x, y, r, alpha)
-        drawEars(canvas)
         pFill.color = Color.WHITE
         pFill.shader = if (pressed) pressedShader else baseShader
         canvas.drawCircle(50f, 50f, 40f, pFill)
         pFill.shader = null
-        pStroke.color = OGRE
+        drawWeb(canvas, 0f, if (pressed) INK else RED)
+        pStroke.color = RED
         pStroke.strokeWidth = 3.5f
         canvas.drawCircle(50f, 50f, 40f, pStroke)
         pStroke.color = 0x40000000
         pStroke.strokeWidth = 2f
         canvas.drawCircle(50f, 50f, 35.5f, pStroke)
-        if (latched) {  // залипшая кнопка (toggle): светлое внутреннее кольцо
-            pStroke.color = CREAM
+        if (latched) {
+            pStroke.color = INK
             pStroke.strokeWidth = 3f
             canvas.drawCircle(50f, 50f, 33f, pStroke)
         }
-        val ink = if (pressed) PRESSED_INK else CREAM
-        val cutColor = if (pressed) PRESSED_EDGE else SWAMP
+        val ink = if (pressed) PRESSED_INK else INK
+        val cutColor = if (pressed) RED else NAVY
         val els = icon?.let { ICONS[it] }
         if (els != null) {
             for (e in els) when (e.mode) {
@@ -158,43 +153,36 @@ object ShrekIcons {
             pText.color = ink
             pText.textSize = if (label.length <= 2) 34f else 19f
             val tw = pText.measureText(label)
-            if (tw > 64f) pText.textSize *= 64f / tw  // длинная надпись — по ширине круга
+            if (tw > 64f) pText.textSize *= 64f / tw
             canvas.drawText(label, 50f, 50f - (pText.descent() + pText.ascent()) / 2, pText)
         }
         canvas.restoreToCount(save)
     }
 
-    // лицо огра (брови, глаза, нос, улыбка) в квадрате 100x100
-    private val FACE_BROWS = SvgPath.parse("M28 38 C34 33 40 33 45 37 M55 37 C60 33 66 33 72 38")
-    private val FACE_NOSE = SvgPath.parse("M44 58 C47 61 53 61 56 58")
-    private val FACE_SMILE = SvgPath.parse("M33 66 C42 74 58 74 67 66")
+    // глаза маски
+    private val EYE_L = SvgPath.parse("M28 46 C34 38 44 39 48 46 C43 52 34 52 28 46 Z")
+    private val EYE_R = SvgPath.parse("M52 46 C56 39 66 38 72 46 C66 52 57 52 52 46 Z")
 
-    // голова Шрека: центр (x, y), радиус головы r (без ушей)
+    // маска: центр (x, y), радиус r
     fun drawHead(canvas: Canvas, x: Float, y: Float, r: Float, alpha: Int, active: Boolean) {
         if (r <= 0f) return
         val save = begin(canvas, x, y, r, alpha)
-        drawEars(canvas, 58f)
         pFill.shader = null
-        pFill.color = if (active) OGRE_LIGHT else OGRE
+        pFill.color = if (active) RED else BLUE
         canvas.drawCircle(50f, 50f, 40f, pFill)
-        pStroke.color = OGRE_DARK
+        drawWeb(canvas, 0f, if (active) INK else RED)
+        pStroke.color = RED
         pStroke.strokeWidth = 4f
         canvas.drawCircle(50f, 50f, 40f, pStroke)
-        pStroke.strokeWidth = 5f
-        canvas.drawPath(FACE_BROWS, pStroke)
-        pFill.color = OGRE_DARK
-        canvas.drawCircle(38f, 47f, 5f, pFill)
-        canvas.drawCircle(62f, 47f, 5f, pFill)
-        pStroke.strokeWidth = 4f
-        canvas.drawPath(FACE_NOSE, pStroke)
-        pStroke.strokeWidth = 4.5f
-        canvas.drawPath(FACE_SMILE, pStroke)
+        pFill.color = INK
+        canvas.drawPath(EYE_L, pFill)
+        canvas.drawPath(EYE_R, pFill)
         canvas.restoreToCount(save)
     }
 
     private val CHEVRON = SvgPath.parse("M45 17 L50 12 L55 17")
 
-    // стик: основание в (bx, by) радиуса r, головка — голова Шрека в (kx, ky)
+    // стик: основание в (bx, by) радиуса r, головка — маска в (kx, ky)
     fun drawStick(canvas: Canvas, bx: Float, by: Float, r: Float, kx: Float, ky: Float, active: Boolean, a: Float) {
         if (r <= 0f) return
         val s = r / 40f
@@ -202,14 +190,14 @@ object ShrekIcons {
         canvas.translate(bx - 50f * s, by - 50f * s)
         canvas.scale(s, s)
         pFill.shader = null
-        pFill.color = SWAMP
+        pFill.color = NAVY
         pFill.alpha = (a * 0.5f * 255).toInt().coerceIn(0, 255)
         canvas.drawCircle(50f, 50f, 40f, pFill)
-        pStroke.color = OGRE
+        pStroke.color = BLUE
         pStroke.alpha = (a * 255).toInt().coerceIn(0, 255)
         pStroke.strokeWidth = 3f
         canvas.drawCircle(50f, 50f, 40f, pStroke)
-        pStroke.color = CREAM
+        pStroke.color = RED
         pStroke.alpha = (a * 0.9f * 255).toInt().coerceIn(0, 255)
         pStroke.strokeWidth = 2.5f
         for (i in 0 until 4) {
@@ -224,7 +212,6 @@ object ShrekIcons {
         drawHead(canvas, kx, ky, r * 0.38f, (a * 0.95f * 255).toInt(), active)
     }
 
-    // стрелка выбора слота зелья: маленькая болотная кнопка с кремовым треугольником (влево или вправо)
     private val ARROW_RIGHT = SvgPath.parse("M42 30 L66 50 L42 70 C38 73 35 71 35 66 L35 34 C35 29 38 27 42 30 Z")
 
     fun drawArrow(canvas: Canvas, x: Float, y: Float, r: Float, left: Boolean, pressed: Boolean, alpha: Int) {
@@ -234,24 +221,24 @@ object ShrekIcons {
         pFill.shader = if (pressed) pressedShader else baseShader
         canvas.drawCircle(50f, 50f, 40f, pFill)
         pFill.shader = null
-        pStroke.color = OGRE
+        pStroke.color = RED
         pStroke.strokeWidth = 5f
         canvas.drawCircle(50f, 50f, 40f, pStroke)
         if (left) canvas.scale(-1f, 1f, 50f, 50f)
-        canvas.translate(3f, 0f)  // треугольник визуально по центру
-        pFill.color = if (pressed) PRESSED_INK else CREAM
+        canvas.translate(3f, 0f)
+        pFill.color = if (pressed) PRESSED_INK else INK
         canvas.drawPath(ARROW_RIGHT, pFill)
         canvas.restoreToCount(save)
     }
 
-    // номер слота: кремовый кружок с тёмной цифрой и зелёной каймой
+    // номер слота: белый кружок с тёмной цифрой и красной каймой
     fun drawBadge(canvas: Canvas, x: Float, y: Float, r: Float, text: String, alpha: Int) {
         if (r <= 0f) return
         val save = begin(canvas, x, y, r, alpha)
         pFill.shader = null
-        pFill.color = CREAM
+        pFill.color = INK
         canvas.drawCircle(50f, 50f, 40f, pFill)
-        pStroke.color = OGRE_DARK
+        pStroke.color = RED
         pStroke.strokeWidth = 7f
         canvas.drawCircle(50f, 50f, 40f, pStroke)
         pText.color = PRESSED_INK

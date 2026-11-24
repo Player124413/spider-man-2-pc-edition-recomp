@@ -1,4 +1,4 @@
-package com.shreknx.game
+package com.webheadnx.game
 
 import android.annotation.SuppressLint
 import android.app.Activity

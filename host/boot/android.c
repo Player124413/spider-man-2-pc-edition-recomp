@@ -1,4 +1,4 @@
-// Android: JNI для лаунчера (android/app/src/main/java/com/shreknx/game/SnxNative.kt) — экранное управление
+// Android: JNI для лаунчера (android/app/src/main/java/com/webheadnx/game/SnxNative.kt) — экранное управление
 // (host/boot/touch.h) и состояние игры. Методы зовёт поток UI Android; touch_* — потокобезопасны.
 #include <jni.h>
 #include <stdio.h>
@@ -8,7 +8,7 @@
 #include "platform/window.h"
 #include "runtime/hle/hle.h"
 
-#define JNI_FN(name) Java_com_shreknx_game_SnxNative_##name
+#define JNI_FN(name) Java_com_webheadnx_game_SnxNative_##name
 
 JNIEXPORT void JNICALL JNI_FN(pad)(JNIEnv *env, jclass cls, jint buttons, jfloat lx, jfloat ly, jfloat rx, jfloat ry)
 {

@@ -1,9 +1,9 @@
-package com.shreknx.game
+package com.webheadnx.game
 
 import android.graphics.Path
 
 // Разбор атрибута d из SVG (<path d="...">) в android.graphics.Path: значки экранного управления и окна «О порте»
-// записаны как SVG-пути (ShrekIcons.kt), а Android сам SVG не читает. Команды M L H V C S Q T Z — абсолютные и
+// записаны как SVG-пути (WebIcons.kt), а Android сам SVG не читает. Команды M L H V C S Q T Z — абсолютные и
 // относительные (строчные), числа через пробел или запятую, «-» и вторая «.» начинают новое число. Дуг (A) нет:
 // окружности в значках — кривыми C или drawCircle.
 object SvgPath {

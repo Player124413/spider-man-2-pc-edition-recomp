@@ -4,7 +4,7 @@
 # С игрой — «Run workflow» со ссылкой на архив своей копии игры (или секрет SNX_GAME_SYSTEM_URL): код игры
 # генерируется рекомпилятором из её System (tools/fetch_game.sh). Английская и русская локализации Spider-Man 2
 # используют один и тот же сгенерированный код: один APK поддерживает оба языка, вариант eng/rus не нужен.
-# Артефакт — сам APK (без zip), подписанный постоянным ключом (android/shreknx-release.jks.b64): новая сборка
+# Артефакт — сам APK (без zip), подписанный постоянным ключом (android/webhead2-release.p12.b64): новая сборка
 # ставится поверх старой без удаления; versionCode — по времени коммита (растёт с каждым коммитом).
 name: Android APK
 
@@ -172,10 +172,10 @@ jobs:
           BT="$ANDROID_HOME/build-tools/35.0.0"
           "$BT/apksigner" verify --print-certs "$APK" > "$RUNNER_TEMP/cert.txt"
           head -3 "$RUNNER_TEMP/cert.txt"
-          # постоянный ключ репозитория (android/shreknx-release.jks.b64): иначе обновление не встанет поверх
+          # постоянный ключ репозитория (android/webhead2-release.p12.b64): иначе обновление не встанет поверх
           D=$(sed -n 's/.*certificate SHA-256 digest: //p' "$RUNNER_TEMP/cert.txt" | head -1)
-          [ "$D" = 90071132e1f6152373649029ee9c3f41cf5feba67132318a3186e0ff4f491a2f ] \
-            || { echo "::error::APK подписан не ключом android/shreknx-release.jks.b64 ($D)"; exit 1; }
+          [ "$D" = 7b17d3b544ae8b3d751b94cb647e79637578f43532ab3d7dc7e4933a824a327a ] \
+            || { echo "::error::APK подписан не ключом android/webhead2-release.p12.b64 ($D)"; exit 1; }
           # выравнивание в zip (несжатые .so — по 16 КБ): иначе установщик отвечает «Приложение не установлено»
           "$BT/zipalign" -c -P 16 4 "$APK" || { echo "::error::APK не выровнен (zipalign -c -P 16 4)"; exit 1; }
           # libmain.so: JNI экранного управления и SDL_main на месте, выравнивание 16 КБ, ролики (FFmpeg)
@@ -183,8 +183,8 @@ jobs:
           unzip -o -q "$APK" lib/arm64-v8a/libmain.so -d "$RUNNER_TEMP/apk"
           SO="$RUNNER_TEMP/apk/lib/arm64-v8a/libmain.so"
           "$TC/llvm-nm" -D --defined-only "$SO" > "$RUNNER_TEMP/syms.txt"
-          for s in SDL_main Java_com_shreknx_game_SnxNative_pad Java_com_shreknx_game_SnxNative_look \
-                   Java_com_shreknx_game_SnxNative_key Java_com_shreknx_game_SnxNative_state; do
+          for s in SDL_main Java_com_webheadnx_game_SnxNative_pad Java_com_webheadnx_game_SnxNative_look \
+                   Java_com_webheadnx_game_SnxNative_key Java_com_webheadnx_game_SnxNative_state; do
             grep -q " T $s\$" "$RUNNER_TEMP/syms.txt" || { echo "::error::в libmain.so нет $s"; exit 1; }
           done
           "$TC/llvm-readelf" -lW "$SO" | grep LOAD | awk '{ if ($NF != "0x4000") bad=1 } END { exit bad }' \
