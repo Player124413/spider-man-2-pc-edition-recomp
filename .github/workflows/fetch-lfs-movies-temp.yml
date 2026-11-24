@@ -1,5 +1,6 @@
 # ВРЕМЕННО: вытащить настоящие Movies/*.bik из LFS через сеть GitHub Actions (в песочнице CDN недоступен).
-# Артефакт скачивается в references/coolgame/Movies, после чего workflow удаляется из ветки.
+# Ролики кладутся в отдельную ветку temp/coolgame-movies, оттуда забираются в references/ (gitignored),
+# после чего ветка и этот workflow удаляются. В PR игровые файлы не попадают.
 name: Fetch coolgame LFS movies (temp)
 
 on:
@@ -8,10 +9,16 @@ on:
     paths:
       - '.github/workflows/fetch-lfs-movies-temp.yml'
 
+permissions:
+  contents: write
+
 jobs:
   fetch:
     runs-on: ubuntu-latest
     steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
       - name: Клон только Movies с LFS
         run: |
           set -euo pipefail
@@ -32,11 +39,14 @@ jobs:
           done
           echo "Загружено BIK: $n"
           du -sh Movies
+          mkdir -p ../movies
+          cp Movies/*.bik ../movies/
 
-      - name: Артефакт с роликами
-        uses: actions/upload-artifact@v4
-        with:
-          name: coolgame-movies
-          path: coolgame/Movies/*.bik
-          retention-days: 1
-          compression-level: 0
+      - name: Отправить ролики во временную ветку
+        run: |
+          set -euo pipefail
+          git checkout --orphan temp/coolgame-movies
+          git rm -rf --cached . >/dev/null
+          git add -f movies/*.bik
+          git -c user.name='Arena agent' -c user.email='agent@arena.ai' commit -q -m 'temp: настоящие Movies/*.bik из coolgame LFS'
+          git push --force origin temp/coolgame-movies
