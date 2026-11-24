@@ -482,7 +482,7 @@ class TestEmit(unittest.TestCase):
             self.assertIn("double f0 = 0;", c_t)
 
             # Модуль msvcr70.dll -> всегда double
-            prog_crt, mod_crt = make_program(code, base=0x13000000, name="msvcr70.dll")
+            prog_crt, mod_crt = make_program(code, base=0x13000000, name="msvcr71.dll")
             mod_crt.run()
             c_crt = emit.FuncCompiler(mod_crt, mod_crt.functions[0x13001000], gen.Ctx(prog_crt)).compile()
             self.assertIn("double f0 = 0;", c_crt)
@@ -815,10 +815,21 @@ class TestCheckAndOverrides(unittest.TestCase):
                     ("stxt774", b"\x90" * 64, image.IMAGE_SCN_MEM_EXECUTE | image.IMAGE_SCN_CNT_CODE),
                     ("stxt371", b"\xc3" * 64, image.IMAGE_SCN_MEM_EXECUTE | image.IMAGE_SCN_CNT_CODE),
                 ],
-                image_base=0x10900000,
+                image_base=0x400000,  # webhead.exe из addrmap.json
                 entry_rva=0x3000,  # точка входа в stxt371
             )
-            with open(os.path.join(sys_dir, "Game.exe"), "wb") as f:
+            # check_game сначала сообщает об отсутствующих модулях: кладём все 12 из addrmap
+            amap = recomp_main.load_addrmap()
+            exe_name = next(n for n in amap if n.lower() == "webhead.exe")
+            for name, base in amap.items():
+                if name.lower() == "webhead.exe":
+                    continue
+                dummy = make_minimal_pe(
+                    [(".text", b"\x90\xc3", image.IMAGE_SCN_MEM_EXECUTE | image.IMAGE_SCN_CNT_CODE)],
+                    image_base=base, entry_rva=0x1000, is_dll=name.lower().endswith(".dll"))
+                with open(os.path.join(sys_dir, name), "wb") as f:
+                    f.write(dummy)
+            with open(os.path.join(sys_dir, exe_name), "wb") as f:
                 f.write(sd_pe)
 
             buf = io.StringIO()
@@ -835,10 +846,10 @@ class TestCheckAndOverrides(unittest.TestCase):
                     (".text", b"\x90\xc3" * 32, image.IMAGE_SCN_MEM_EXECUTE | image.IMAGE_SCN_CNT_CODE),
                     (".icd", b"\x90" * 32, 0x40000040),
                 ],
-                image_base=0x10900000,
+                image_base=0x400000,  # webhead.exe из addrmap.json
                 entry_rva=0x1000,
             )
-            with open(os.path.join(sys_dir, "Game.exe"), "wb") as f:
+            with open(os.path.join(sys_dir, exe_name), "wb") as f:
                 f.write(icd_pe)
             buf2 = io.StringIO()
             errs2, _ = recomp_main.check_game(sys_dir, stream=buf2)
@@ -846,24 +857,27 @@ class TestCheckAndOverrides(unittest.TestCase):
             self.assertIn(".icd", buf2.getvalue())
 
     def test_overrides_verify_unique_missing_and_duplicate(self):
-        sig_bytes = bytes(int(p, 16) if p != "?" else 0x00 for p in overrides.SIGS["file_read"].split())
-        # Ровно одно совпадение -> ok
-        prog1, _ = make_program(b"\x90" * 16 + sig_bytes + b"\xc3", base=0x10900000, name="game.exe")
+        # Единственная сигнатура в overrides.py Spider-Man 2 — memcpy из статического CRT
+        sig_bytes = bytes(int(p, 16) if p != "?" else 0x00 for p in overrides.SIGS["memcpy"].split())
+        # Ровно одно совпадение в Engine.dll -> ok
+        prog1, _ = make_program(b"\x90" * 16 + sig_bytes + b"\xc3", base=0x12000000, name="Engine.dll")
         res1 = {k: (st, det) for k, _, st, det in overrides.verify(prog1)}
-        self.assertEqual(res1["game.exe!=file_read"][0], "ok")
-        self.assertEqual(res1["game.exe!=file_read"][1], 0x10901010)
-        # Другая сигнатура game.exe отсутствует -> missing_sig
-        self.assertEqual(res1["game.exe!=file_write"][0], "missing_sig")
+        self.assertEqual(res1["Engine.dll!=memcpy"][0], "ok")
+        self.assertEqual(res1["Engine.dll!=memcpy"][1], 0x12001010)
+        # Модуль D3DDrv.dll есть, но сигнатуры в нём нет -> missing_sig
+        prog_miss, _ = make_program(b"\xc3", base=0x12800000, name="D3DDrv.dll")
+        res_miss = {k: (st, det) for k, _, st, det in overrides.verify(prog_miss)}
+        self.assertEqual(res_miss["D3DDrv.dll!=memcpy"][0], "missing_sig")
         # Дубликат сигнатуры -> dup_sig
-        prog2, _ = make_program(sig_bytes + b"\x90" * 8 + sig_bytes, base=0x10900000, name="game.exe")
+        prog2, _ = make_program(sig_bytes + b"\x90" * 8 + sig_bytes, base=0x12000000, name="Engine.dll")
         res2 = {k: (st, det) for k, _, st, det in overrides.verify(prog2)}
-        self.assertEqual(res2["game.exe!=file_read"][0], "dup_sig")
-        self.assertEqual(len(res2["game.exe!=file_read"][1]), 2)
-        # Проверка экспортов msvcr70.dll
-        prog3, _ = make_program(b"\xc3", base=0x13000000, name="msvcr70.dll", exports={"rand": 0x13001000})
+        self.assertEqual(res2["Engine.dll!=memcpy"][0], "dup_sig")
+        self.assertEqual(len(res2["Engine.dll!=memcpy"][1]), 2)
+        # Экспорты msvcr71.dll
+        prog3, _ = make_program(b"\xc3", base=0x13000000, name="msvcr71.dll", exports={"rand": 0x13001000})
         res3 = {k: (st, det) for k, _, st, det in overrides.verify(prog3)}
-        self.assertEqual(res3["msvcr70.dll!rand"][0], "ok")
-        self.assertEqual(res3["msvcr70.dll!srand"][0], "missing_export")
+        self.assertEqual(res3["msvcr71.dll!rand"][0], "ok")
+        self.assertEqual(res3["msvcr71.dll!srand"][0], "missing_export")
 
 
 if __name__ == "__main__":

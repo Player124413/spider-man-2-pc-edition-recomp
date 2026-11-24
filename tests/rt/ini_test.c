@@ -154,7 +154,7 @@ int main(int argc, char **argv)
     snprintf(path, sizeof path, "%s/user/System", g_dir);
     mkdir(path, 0755);
     snprintf(user_ini, sizeof user_ini, "%s/user/System/User.ini", g_dir);
-    snprintf(game_ini, sizeof game_ini, "%s/user/System/game.ini", g_dir);
+    snprintf(game_ini, sizeof game_ini, "%s/user/System/Webhead.ini", g_dir);  // Spider-Man 2, не Shrek 2
     static char buf[1 << 16];
     size_t n = 0;
     char *u, v[256];
