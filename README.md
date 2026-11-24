@@ -16,9 +16,13 @@
 - `tests/smoke/spider_smoke.c` грузит все 12 модулей в гостевую память и выполняет реальный
   сгенерированный код из `Core.dll` (`appStrlen`, `appMemcmp`) — тест проходит.
 - `DllMain` всех модулей успешно вызывается в headless-проверке.
-- Полностью игровой запуск (графика, звук, ролики) **пока не готов**: слой HLE требует
-  доработки под Webhead, а в песочнице нет SDL2/OpenGL/OpenAL/FreeType. Подробности —
-  [docs/RECOMP_STATUS.md](docs/RECOMP_STATUS.md).
+- **Headless-запуск игры готов**: `tests/headless/headless_run.c` подключает все 12 модулей,
+  проходит заставку, создаёт D3D8-устройство и входит в кадровый цикл (13 draw calls,
+  7 GL-программ на кадр) без единого HLE-trap. Проверяется командой
+  `GAME=references/coolgame tools/recomp.sh headless`.
+- Ограничения headless-режима: нет SDL-окна и ввода, видео Bink показывает чёрные кадры (нет libavcodec),
+  звук и геймпад не выводятся наружу. Это **не интерактивный порт**, а рабочий
+  headless-прогон рекомпилированного кода. Подробности — [docs/RECOMP_STATUS.md](docs/RECOMP_STATUS.md).
 
 ## Быстрый старт
 
@@ -31,15 +35,20 @@ python3 -m venv .venv
 git clone --no-single-branch https://github.com/Player124413/Shrek2-android_edition references/Shrek2-android_edition
 git clone --no-single-branch https://github.com/Player124413/coolgame references/coolgame
 
-# 3. Проверка игры, трансляция, сборка и smoke-тест
+# 3. Проверка игры, трансляция, сборка, smoke-тест и headless-прогон
 tools/recomp.sh all
 ```
+
+`all` заканчивается строкой `HEADLESS SMOKE OK: startup без trap, кадров: N`.
+Только headless-проверка (после `gen`/`build`): `tools/recomp.sh headless`.
 
 Переменные окружения: `GAME` (путь к каталогу игры, по умолчанию `references/coolgame`),
 `JOBS` (число параллельных процессов), `GEN` (каталог сгенерированного C), `CC`.
 
 Отдельные шаги: `tools/recomp.sh check`, `tools/recomp.sh gen`, `tools/recomp.sh build`,
-`tools/recomp.sh smoke`. Generated C и объекты попадают в `build/` и в git не добавляются.
+`tools/recomp.sh smoke`, `tools/recomp.sh headless`. Generated C и объекты попадают в `build/`
+и в git не добавляются. Пользовательский каталог для headless-запуска готовится из
+`tests/headless/userdata/System/Webhead.ini` (D3DDrv + ALAudio, без Null-устройств).
 
 ## Структура
 
@@ -50,6 +59,8 @@ tools/recomp.sh all
 | `host/`, `platform/` | хостовой загрузчик и SDL/OpenGL-слой (унаследованы от shrekNX, требуют доработки) |
 | `tools/` | `recomp.sh`, `compile_gen.py`, `build_smoke.sh` и утилиты shrekNX |
 | `tests/smoke/` | проверка сгенерированного кода без графики |
+| `tests/headless/`, `tools/build_headless.sh` | headless-харнесс, HLE-сборка и проверка кадрового цикла |
+| `platform/headless/` | GL/FreeType/platform-заглушки, не требующие SDL и системных dev-пакетов |
 | `references/` | полные клоны репозиториев-источников (не коммитятся) |
 
 ## Лицензия и активы

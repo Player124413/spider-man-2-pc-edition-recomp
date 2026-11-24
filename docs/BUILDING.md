@@ -1,4 +1,7 @@
-> Инструкция унаследована от shrekNX и описывает сборку порта Shrek 2. Для Spider-Man 2 PC в этой ветке работает путь `tools/recomp.sh` (генерация C + сборка библиотек + smoke-тест); подробности — [RECOMP_STATUS.md](RECOMP_STATUS.md).
+> Инструкция унаследована от shrekNX и описывает сборку порта Shrek 2. Для Spider-Man 2 PC в этой ветке работает путь `tools/recomp.sh` (генерация C + сборка библиотек + smoke-тест + headless-прогон до кадрового цикла); подробности — [RECOMP_STATUS.md](RECOMP_STATUS.md).
+>
+> Headless-сборка не требует SDL2/OpenGL/OpenAL/FreeType: `tools/build_headless.sh` использует
+> заглушки из `platform/headless/`. Запуск: `tools/recomp.sh headless` (после `gen`/`build`).
 
 # Сборка и запуск
 

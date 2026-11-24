@@ -732,3 +732,17 @@ int bink_movie_overlay(const u8 **rgba, u32 *w, u32 *h)
     *h = m->h;
     return 1;
 }
+
+// Замена системного звукодрайвера Bink и глобальный выключатель звука: в headless-сборке звук
+// идёт через bink_audio.c, поэтому достаточно вернуть «предыдущее» состояние.
+void hle_binkw32__BinkSetSoundSystem_8(CPU *c)
+{
+    HLE_ENTER("BinkSetSoundSystem", 2);
+    RET(2, 0);
+}
+
+void hle_binkw32__BinkSetSoundOnOff_8(CPU *c)
+{
+    HLE_ENTER("BinkSetSoundOnOff", 2);
+    RET(2, 1);
+}

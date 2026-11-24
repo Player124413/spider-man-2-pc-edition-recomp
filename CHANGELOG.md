@@ -6,6 +6,18 @@
 
 ## Не выпущено
 
+### Spider-Man 2 PC (эта ветка)
+
+- **Headless-рекомпиляция доведена до рабочего кадрового цикла.** Харнесс
+  `tests/headless/headless_run.c` загружает все 12 модулей, проходит заставку и Bink-ролики,
+  создаёт D3D8-устройство и отрисовывает кадры без HLE-trap. Проверка —
+  `tools/recomp.sh headless`, полный цикл — `tools/recomp.sh all`.
+- Добавлены HLE `kernel32!InterlockedExchange`, shell32 folder API и
+  `binkw32!BinkSetSoundSystem`/`BinkSetSoundOnOff`; исправлен UAF в `kernel32_file!find_first`.
+- Headless GL-заглушки теперь возвращают валидные объекты/статусы, поэтому D3D8 HLE компилирует
+  шейдеры. Конфиг для проверки использует `D3DDrv` + `ALAudio` (NullAudio ломал старт).
+- Ограничения: нет SDL-окна/ввода/звука, ролики показывают чёрные кадры (без libavcodec).
+
 ### Android (не проверено на устройстве)
 
 - **Слияние с Ananasiy/shrekNX 0.3.0:** поток рендера D3D8 на отдельном ядре (вызовы GL — только в нём),

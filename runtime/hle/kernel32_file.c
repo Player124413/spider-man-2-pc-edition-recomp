@@ -1630,9 +1630,10 @@ static u32 find_first(CPU *c, int wide)
         snprintf(f->pattern, sizeof f->pattern, "%s", rel);
     }
     f->count = vfs_list(f->rel_dir, &f->names);
-    if (f->count < 0 || !find_fill(f, ARG(1))) {
+    int count = f->count;  // close_find() освобождает f — читать count после него нельзя
+    if (count < 0 || !find_fill(f, ARG(1))) {
         close_find(f);
-        rt_set_last_error(f->count < 0 ? ERROR_PATH_NOT_FOUND : ERROR_FILE_NOT_FOUND);
+        rt_set_last_error(count < 0 ? ERROR_PATH_NOT_FOUND : ERROR_FILE_NOT_FOUND);
         return 0xFFFFFFFFu;
     }
     u32 h = hle_obj_new(OBJ_FIND, f);

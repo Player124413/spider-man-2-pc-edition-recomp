@@ -1759,3 +1759,12 @@ void hle_kernel32_ReadConsoleA(CPU *c) { HLE_ENTER("ReadConsoleA", 5); RET(5, 0)
 void hle_kernel32_ReadConsoleW(CPU *c) { HLE_ENTER("ReadConsoleW", 5); RET(5, 0); }
 void hle_kernel32_WriteConsoleA(CPU *c) { HLE_ENTER("WriteConsoleA", 5); RET(5, 0); }
 void hle_kernel32_WriteConsoleW(CPU *c) { HLE_ENTER("WriteConsoleW", 5); RET(5, 0); }
+
+// mscr71: InterlockedExchange — атомарная подстановка dword (stdcall, 2 аргумента).
+void hle_kernel32_InterlockedExchange(CPU *c)
+{
+    HLE_ENTER("InterlockedExchange", 2);
+    u32 target = ARG(0), value = ARG(1);
+    u32 old = target ? __atomic_exchange_n((u32 *)(g_mem + target), value, __ATOMIC_SEQ_CST) : 0;
+    RET(2, old);
+}

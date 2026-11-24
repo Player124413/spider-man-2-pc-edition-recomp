@@ -36,14 +36,18 @@ case "$CMD" in
     "$ROOT/tools/build_smoke.sh"
     "$ROOT/build/smoke/spider_smoke" "$GAME"
     ;;
+  headless)
+    GAME="$GAME" "$ROOT/tools/headless_smoke.sh"
+    ;;
   all)
     "$0" check
     "$0" gen
     "$0" build
     "$0" smoke
+    "$0" headless
     ;;
   *)
-    echo "Использование: $0 {check|gen|build|smoke|all}" >&2
+    echo "Использование: $0 {check|gen|build|smoke|headless|all}" >&2
     exit 2
     ;;
 esac

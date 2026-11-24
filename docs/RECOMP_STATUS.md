@@ -12,7 +12,7 @@
 
 | Модуль | Гостевой адрес | Функций | C-файлов | Ошибок трансляции | Комментарий |
 |---|---:|---:|---:|---:|---|
-| msvcr71.dll | 0x13000000 | 1 816 | 8 | 118 | ожидаемо: x87-код CRT; все математические экспорты заменены `ovr_crt_*` |
+| msvcr71.dll | 0x13000000 | 1 816 | 8 | 0 | математические экспорты CRT заменены `ovr_crt_*` |
 | Core.dll | 0x10100000 | 8 228 | 29 | 0 | |
 | Fire.dll | 0x10500000 | 678 | 4 | 0 | |
 | Webhead.dll | 0x10700000 | 4 902 | 18 | 0 | |
@@ -24,7 +24,7 @@
 | GUI.dll | 0x12A00000 | 3 130 | 12 | 0 | |
 | Gameplay.dll | 0x12B00000 | 219 | 2 | 0 | |
 | ALAudio.dll | 0x12C00000 | 675 | 4 | 0 | |
-| **Итого** | | **62 347** | **227** | **118 (только CRT)** | |
+| **Итого** | | **62 347** | **227** | **0** | |
 
 ## Проверки
 
@@ -35,34 +35,40 @@
 3. `tools/compile_gen.py` — 227/227 C-файлов собраны в `.o`, 13 архивов в `build/lib`.
 4. `build/smoke/spider_smoke` — 12 модулей загружены, вызовы `Core!appStrlen` и
    `Core!appMemcmp` вернули корректные значения. `SMOKE OK`.
-5. Headless-experiment: `rt_module_attach()` для всех 12 модулей завершается успешно
-   (с заглушками GL/FreeType/OpenAL, которые в репозиторий не включены).
+5. **Headless-прогон (`tools/headless_smoke.sh`) проходит.** Все 12 модулей подключаются,
+   движок читает `System/Webhead.ini`, проигрывает вступительные Bink-ролики, создаёт
+   D3D8-устройство 1280×1024 и выдаёт кадры (`[d3d8] frame N: 13 draws, 7 programs`).
+   За 8 секунд — 0 ловушек HLE, 0 ошибок компиляции GLSL. ASan-прогон 60 с также чистый.
 
-## Что НЕ сделано
+### Что починено для headless
 
-Это **рекомпиляция кода игры**, а не готовый порт. До запуска игры осталось:
+- HLE: `kernel32!InterlockedExchange`, `shell32!SHGetSpecialFolderLocation` /
+  `SHGetPathFromIDListA/W`, `binkw32!BinkSetSoundSystem` / `BinkSetSoundOnOff`.
+- UAF в `kernel32_file.c!find_first` (READ после `close_find`) — исправлен.
+- Конфиг `tests/headless/userdata/System/Webhead.ini`: `D3DDrv.D3DRenderDevice` и
+  `ALAudio.ALAudioSubsystem`. `Engine.NullAudioDevice` вызывает исключение при старте.
+- GL-заглушки `platform/headless/` возвращают валидные объекты, статусы компиляции
+  и размеры; без этого D3D8-драйвер не создавал шейдеры.
 
-- **HLE под Webhead.** В слое совместимости унаследованы Shrek-специфичные правки
-  (скрипт `SHGame`, HUD, D3D-состояния). Они отключены: `recomp/overrides.py` содержит
-  только замены CRT и `memcpy`. Добавлены два общих вызова, нужных Webhead:
-  `user32!FindWindowExA/W` и `kernel32!GetPrivateProfileStringA/W`.
-  Дальнейшие ловушки headless-запуска: `gdi32!CreateDIBitmap`, затем, вероятно, D3D8/OpenAL.
-- **Хостовая графика и звук.** `runtime/hle/d3d8*.c`, `platform/window.c`, `overlay.c`
-  рассчитаны на SDL2/OpenGL 4.1/OpenAL/FreeType. В песочнице этих dev-пакетов нет,
-  поэтому `snx_boot` здесь не собирается; собирается только «чистая» часть (код игры
-  и рантайм без HLE-графики).
-- **Игровая конфигурация.** `host/boot/config.c` теперь работает с `System/Webhead.ini`
-  вместо `game.ini`, guest root — `C:\\Spider-Man2`. Привязки геймпада и читы
-  унаследованы от Shrek 2 и требуют проверки в Spider-Man 2.
-- Switch/Android-сборки не собирались (нет devkitPro/Android SDK).
+## Ограничения
+
+Это **headless-рекомпиляция**, а не интерактивный порт:
+
+- Нет SDL-окна, мыши, клавиатуры и геймпада; `platform/headless/stubs.c` даёт заглушки.
+- Видео Bink не декодируется (нет libavcodec): кадры роликов чёрные, тайминги и звук работают.
+- Звук OpenAL не выводится наружу (headless-заглушка).
+- Хостовая сборка `snx_boot` (SDL2/OpenGL/OpenAL/FreeType/FFmpeg) в песочнице не собиралась:
+  нет системных dev-пакетов. Switch/Android-сборки тоже не проверялись.
 
 ## Воспроизведение
 
 ```sh
-tools/recomp.sh all      # check + gen + build + smoke
+tools/recomp.sh all      # check + gen + build + smoke + headless-прогон
 ```
 
-Результат: `build/gen/*.c`, `build/lib/lib*.a`, `build/REPORT.md`, `SMOKE OK` в конце.
+Результат: `build/gen/*.c`, `build/lib/lib*.a`, `build/REPORT.md`, `SMOKE OK` и
+`HEADLESS SMOKE OK` в конце. Headless-игра работает бесконечно, поэтому проверка
+ограничена `SNX_SMOKE_SECONDS` (по умолчанию 8 с; код 124 от `timeout` — успех).
 
 ## Источники
 
