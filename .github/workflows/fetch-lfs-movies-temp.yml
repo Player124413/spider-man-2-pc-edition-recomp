@@ -4,6 +4,9 @@ name: Fetch coolgame LFS movies (temp)
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/fetch-lfs-movies-temp.yml'
 
 jobs:
   fetch:
