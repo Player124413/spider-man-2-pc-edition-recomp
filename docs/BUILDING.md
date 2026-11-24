@@ -175,11 +175,10 @@ tools/build.sh android        # или android-rus
 
 ```sh
 tools/build.sh android-rus       # -> build/webheadNX-rus.apk (или mac-rus / switch-rus)
-tools/build.sh android-uni       # обе локализации в одном APK
 ```
 
-В Android-лаунчере универсальной сборки вариант определяется по `System/Startup.int`: CRC и дата модулей
-у обеих локализаций одинаковые, поэтому сравнение `Core.dll` не используется как основной признак.
+Вариант APK (`eng` или `rus`) выбирается при сборке; внутри лаунчер определяет язык по `System/Startup.int`,
+поскольку CRC и дата модулей у локализаций одинаковые.
 
 ## Частые проблемы
 

@@ -43,9 +43,9 @@ object Updater {
 
     // подходящие виды APK, по предпочтению: английский можно обновить и универсальным (тот же пакет)
     private fun variants(): List<String> = when (BuildConfig.VARIANT) {
-        "eng" -> listOf("eng", "uni")
+        "eng" -> listOf("eng")
         "rus" -> listOf("rus")
-        else -> listOf("uni")
+        else -> listOf("eng")
     }
 
     // сеть — не из главного потока

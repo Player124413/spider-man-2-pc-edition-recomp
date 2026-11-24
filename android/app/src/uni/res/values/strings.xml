@@ -1,5 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- универсальный APK (flavor uni): название по языку телефона; у eng/rus — resValue в build.gradle -->
-<resources>
-    <string name="app_name">Spider-Man 2</string>
-</resources>

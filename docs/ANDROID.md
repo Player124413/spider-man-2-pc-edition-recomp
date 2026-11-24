@@ -50,13 +50,12 @@ adb install -r build/webheadNX-eng.apk
 
 ## CI
 
-В репозитории — оригинальные workflow из shrekNX: `.github/workflows/android.yml` и
-`.github/workflows/ci.yml`.
+В репозитории — workflow из shrekNX (`.github/workflows/android.yml` и `.github/workflows/ci.yml`),
+адаптированные под Spider-Man 2: варианты `eng`/`rus`, без универсальной сборки.
 
 * `android.yml` при push/PR собирает APK **без кода игры** (проверка лаунчера, JNI, выравнивания .so
-  и подписи). Через «Run workflow» можно собрать APK с кодом своей копии: варианты `eng`, `rus`,
-  `both` (универсальный APK с двумя наборами кода). Для `rus`/`both` нужны отдельные генерации
-  `build/gen-rus` не нужен: русская локализация Spider-Man 2 лежит в `System/*.int`, а PE-модули те же.
+  и подписи). Через «Run workflow» можно собрать APK с кодом своей копии: варианты `eng` и `rus`.
+  Отдельные генерации не нужны: русская локализация Spider-Man 2 лежит в `System/*.int`, а PE-модули те же.
 * `ci.yml` гоняет проверки исходников, рекомпилятор и CTest на macOS/Linux.
 * Релизы без игры (`webheadNX-nogame-eng-...apk`) нужны для проверки обновлений лаунчером. APK с
   кодом игры в публичные релизы не выкладываются.
@@ -71,11 +70,10 @@ adb install -r build/webheadNX-eng.apk
 
 ```sh
 tools/build.sh android-rus       # -> build/webheadNX-rus.apk (ставится рядом с eng)
-tools/build.sh android-uni       # -> build/webheadNX-uni.apk (обе локализации в одном APK)
 ```
 
-Для `uni` в `assets/variants.txt` пишутся CRC одной и той же копии модулей, поэтому выбор делается по
-`Startup.int`, а не по CRC.
+Универсальной сборки (`uni` / `both`) нет: она нужна была только когда русская версия имела другие DLL.
+Здесь локализации различаются только `.int`, поэтому варианты — два отдельных APK.
 
 ## Ограничения
 

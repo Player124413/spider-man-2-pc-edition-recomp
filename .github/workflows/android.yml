@@ -1,10 +1,10 @@
 # Сборка APK для Android (docs/ANDROID.md, «Сборка в GitHub Actions»).
 # Без игры (push, PR или «Run workflow» с пустой ссылкой) — APK со всем кодом порта, лаунчером и редактором
 # управления, но без кода игры (SNX_NO_GAME): «Играть» сообщает, что игры в сборке нет. Push и PR собирают
-# универсальный (both) — проверка всей цепочки.
+# английскую сборку; русскую можно запустить вручную.
 # С игрой — «Run workflow» со ссылкой на архив своей копии игры (или секрет SNX_GAME_SYSTEM_URL): код игры
-# генерируется рекомпилятором из её System (tools/fetch_game.sh). Версия both — универсальный APK с обеими
-# версиями игры: game_url — английская копия, game_url_rus — русская (tools/build.sh android-uni).
+# генерируется рекомпилятором из её System (tools/fetch_game.sh). Английская и русская локализации Spider-Man 2
+# используют один и тот же сгенерированный код, поэтому отдельной универсальной сборки (both/uni) нет.
 # Артефакт — сам APK (без zip), подписанный постоянным ключом (android/shreknx-release.jks.b64): новая сборка
 # ставится поверх старой без удаления; versionCode — по времени коммита (растёт с каждым коммитом).
 name: Android APK
@@ -32,14 +32,10 @@ on:
         type: string
         default: ''
       variant:
-        description: 'Версия игры (rus — в System нужен распакованный английский game.exe; both — обе в одном APK: английская по game_url, русская по game_url_rus)'
+        description: 'Локализация: eng или rus (PE-модули и сгенерированный код общие)'
         type: choice
-        options: [eng, rus, both]
+        options: [eng, rus]
         default: eng
-      game_url_rus:
-        description: 'Только для both: ссылка на архив русской версии игры'
-        type: string
-        default: ''
       release:
         description: 'Выпустить APK без игры в GitHub Releases (лаунчер проверяет там обновления). APK с кодом игры не выпускается'
         type: boolean
@@ -81,34 +77,23 @@ jobs:
         run: |
           ev() { jq -r ".inputs.$1 // \"\"" "$GITHUB_EVENT_PATH"; }
           URL=$(ev game_url | tr -d '[:space:]')
-          URL_RUS=$(ev game_url_rus | tr -d '[:space:]')
           VARIANT=$(ev variant)
           [ -n "$URL" ] || URL="$SECRET_URL"
           [ -n "$URL" ] && echo "::add-mask::$URL"
-          [ -n "$URL_RUS" ] && echo "::add-mask::$URL_RUS"
-          case "$VARIANT" in rus|both) ;; *) VARIANT=eng ;; esac
-          # push и PR — универсальный APK без игры: так проверяется вся цепочка (rus, libmain_rus.so, flavor uni)
-          [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] || VARIANT=both
+          case "$VARIANT" in rus) ;; *) VARIANT=eng ;; esac
+          # push и PR проверяют английскую сборку; русскую можно собрать вручную («Run workflow» → rus)
+          [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] || VARIANT=eng
           GAME=0
-          if [ "$VARIANT" = both ]; then
-            # обе ссылки или ни одной (тогда — универсальный APK без игры, для проверки лаунчера)
-            if [ -n "$URL" ] || [ -n "$URL_RUS" ]; then
-              [ -n "$URL" ] && [ -n "$URL_RUS" ] \
-                || { echo "::error::Для both нужны обе ссылки: game_url (английская) и game_url_rus (русская)"; exit 1; }
-              GAME=1
-              printf %s "$URL" > "$RUNNER_TEMP/game_url"
-              printf %s "$URL_RUS" > "$RUNNER_TEMP/game_url_rus"
-            fi
-          elif [ -n "$URL" ]; then
+          if [ -n "$URL" ]; then
             GAME=1
             printf %s "$URL" > "$RUNNER_TEMP/game_url"
           fi
-          case "$VARIANT" in rus) PLAT=android-rus; FL=rus ;; both) PLAT=android-uni; FL=uni ;; *) PLAT=android; FL=eng ;; esac
+          case "$VARIANT" in rus) PLAT=android-rus; FL=rus ;; *) PLAT=android; FL=eng ;; esac
           {
             echo "game=$GAME"
             echo "variant=$VARIANT"
             echo "plat=$PLAT"
-            echo "apk=build/shrekNX-$FL.apk"
+            echo "apk=build/webheadNX-$FL.apk"
             echo "flavor=$FL"
           } >> "$GITHUB_OUTPUT"
           echo "### Сборка: $([ $GAME = 1 ] && echo "с игрой ($VARIANT)" || echo "без игры")" >> "$GITHUB_STEP_SUMMARY"
@@ -169,12 +154,8 @@ jobs:
             time tools/.venv/bin/python -I recomp/main.py gen --game "$2" --out "$3"
             du -sh "$3"
           }
-          case "$VARIANT" in
-            rus)  gen "$RUNNER_TEMP/game_url" build/game-rus/System build/gen-rus ;;
-            both) gen "$RUNNER_TEMP/game_url" game/System build/gen
-                  gen "$RUNNER_TEMP/game_url_rus" build/game-rus/System build/gen-rus ;;
-            *)    gen "$RUNNER_TEMP/game_url" game/System build/gen ;;
-          esac
+          # English/Russian — одна и та же PE-копия и один build/gen; менять SNX_VARIANT достаточно при сборке APK
+          gen "$RUNNER_TEMP/game_url" game/System build/gen
 
       - name: Сборка APK
         shell: bash
@@ -229,27 +210,12 @@ jobs:
             || { echo "::error::LOAD-сегменты не выровнены на 16 КБ"; exit 1; }
           grep -q "SNX_ANDROID_VIDEO:BOOL=ON" build/android-cxx/Release/*/arm64-v8a/CMakeCache.txt \
             || { echo "::error::libmain.so собран без роликов (SNX_ANDROID_VIDEO=OFF)"; exit 1; }
-          # с игрой в libmain.so должен быть код модулей (mod_core и т. д.), без игры — сообщение SNX_NO_GAME;
-          # универсальный — то же для libmain_rus.so (русская версия) и CRC Core.dll обеих копий в assets
-          SOS="$SO"
-          if [ "$FLAVOR" = uni ]; then
-            unzip -o -q "$APK" lib/arm64-v8a/libmain_rus.so -d "$RUNNER_TEMP/apk" \
-              || { echo "::error::в универсальном APK нет libmain_rus.so"; exit 1; }
-            SOS="$SO $RUNNER_TEMP/apk/lib/arm64-v8a/libmain_rus.so"
-            if [ "$GAME" = 1 ]; then
-              unzip -p "$APK" assets/variants.txt | grep -q "^rus " \
-                || { echo "::error::в APK нет assets/variants.txt с CRC обеих версий"; exit 1; }
-            fi
+          # с игрой в libmain.so должен быть код модулей (mod_core и т. д.), без игры — сообщение SNX_NO_GAME
+          if [ "$GAME" = 1 ]; then
+            ! grep -aq "SNX_NO_GAME" "$SO" || { echo "::error::libmain.so собран без модулей игры"; exit 1; }
+          else
+            grep -aq "SNX_NO_GAME" "$SO" || { echo "::error::ожидалась сборка без игры"; exit 1; }
           fi
-          for S in $SOS; do
-            "$TC/llvm-readelf" -lW "$S" | grep LOAD | awk '{ if ($NF != "0x4000") bad=1 } END { exit bad }' \
-              || { echo "::error::$(basename "$S"): LOAD-сегменты не выровнены на 16 КБ"; exit 1; }
-            if [ "$GAME" = 1 ]; then
-              ! grep -aq "SNX_NO_GAME" "$S" || { echo "::error::$(basename "$S") собран без модулей игры"; exit 1; }
-            else
-              grep -aq "SNX_NO_GAME" "$S" || { echo "::error::ожидалась сборка без игры ($(basename "$S"))"; exit 1; }
-            fi
-          done
           {
             "$BT/aapt2" dump badging "$APK" | grep -E "^package|^minSdkVersion|^targetSdkVersion|^launchable"
             echo "APK: $(stat -c %s "$APK") байт"
@@ -267,8 +233,7 @@ jobs:
           VARIANT: ${{ steps.mode.outputs.variant }}
         run: |
           VER=$("$ANDROID_HOME/build-tools/35.0.0/aapt2" dump badging "$APK" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p")
-          [ "$VARIANT" = both ] && VARIANT=uni
-          if [ "$GAME" = 1 ]; then NAME="Shrek2-$VARIANT-$VER.apk"; DAYS=7; else NAME="shrekNX-nogame-$VARIANT-$VER.apk"; DAYS=14; fi
+          if [ "$GAME" = 1 ]; then NAME="Webhead2-$VARIANT-$VER.apk"; DAYS=7; else NAME="webheadNX-nogame-$VARIANT-$VER.apk"; DAYS=14; fi
           mkdir -p build/out
           cp "$APK" "build/out/$NAME"
           echo "path=build/out/$NAME" >> "$GITHUB_OUTPUT"
@@ -286,7 +251,7 @@ jobs:
           if-no-files-found: error
 
       # Выпуск для проверки обновлений лаунчером (Updater.kt ищет в выпусках APK с именем
-      # <Shrek2|shrekNX-nogame>-<eng|rus|uni>-<версия>.apk и сравнивает число после последнего «-»). Только APK без
+      # <Webhead2|webheadNX-nogame>-<eng|rus>-<версия>.apk и сравнивает число после последнего «-»). Только APK без
       # игры: в APK с игрой — переведённый код игры, его не распространяем (AGENTS.md, правило 6).
       - name: Выпуск (GitHub Releases)
         if: github.event_name == 'workflow_dispatch' && inputs.release
@@ -302,7 +267,7 @@ jobs:
           fi
           TAG="v$VER"
           gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
-            gh release create "$TAG" -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "shrekNX $VER" \
+            gh release create "$TAG" -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "webheadNX $VER" \
               --notes "Сборка $VER ($(git log -1 --format=%h)): $(git log -1 --format=%s)"
           gh release upload "$TAG" "$APK" -R "$GITHUB_REPOSITORY" --clobber
           echo "Выпуск: **$TAG**" >> "$GITHUB_STEP_SUMMARY"
