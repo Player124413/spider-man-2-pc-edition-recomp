@@ -15,6 +15,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.RelativeLayout
+import android.widget.Toast
 import org.libsdl.app.SDLActivity
 
 // Игра: SDLActivity (libSDL2.so + libmain.so, SDL_main из host/boot/main.c) в отдельном процессе :game.
@@ -51,6 +52,15 @@ class GameActivity : SDLActivity(), InputManager.InputDeviceListener, DisplayMan
         }
         val t = TouchControlsView(this, settings, editMode = false)
         t.onGear = { gearMenu() }
+        // «M»: главное меню Spider-Man 2 — Bink-заставка, движок её не считает GUI-меню. Без принудительного
+        // режима касания перехватываются экранными кнопками, и пункты «Начать новую игру» не нажимаются.
+        t.onMenuMode = { on ->
+            try { SnxNative.menuMode(on) } catch (e: UnsatisfiedLinkError) {}
+            if (on) Toast.makeText(this,
+                L.t("Режим меню: касайтесь пунктов. Кнопка «M» вернёт экранное управление.",
+                    "Menu mode: tap menu items. The “M” button restores touch controls."),
+                Toast.LENGTH_LONG).show()
+        }
         SDLActivity.mLayout.addView(t, RelativeLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         touch = t
         inputManager = (getSystemService(Context.INPUT_SERVICE) as InputManager).also {

@@ -606,6 +606,22 @@ void hle_binkw32__BinkNextFrame_4(CPU *c)
     RET(1, 0);
 }
 
+// BinkWait(bink): TRUE, пока не пришло время следующего кадра. Без этой функции игра (Engine/D3DDrv) ловит HLE-trap
+// на первом же настоящем ролике: с 132-байтовыми LFS-указателями вызывалась только BinkOpen, а BinkWait — нет.
+// Не блокируем поток — только сообщаем игре, пора ли звать BinkNextFrame; в остальном — как обычный Bink SDK.
+void hle_binkw32__BinkWait_4(CPU *c)
+{
+    HLE_ENTER("BinkWait", 1);
+    bink *b = by_obj(ARG(0));
+    int wait = 0;
+    if (b && b->fps) {
+        u64 period = (u64)b->fpsdiv * 1000000000ull / b->fps;  // длительность кадра, нс
+        if (period && rt_ticks_ns() - b->tick_ns < period)
+            wait = 1;
+    }
+    RET(1, wait);
+}
+
 // BinkCopyToBuffer(bink, dest, destpitch, destheight, destx, desty, flags): последний декодированный кадр
 // (без декодера — чёрный)
 void hle_binkw32__BinkCopyToBuffer_28(CPU *c)

@@ -9,6 +9,8 @@ check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fail=1; fi; }
 check "Gradle-проект" "test -f '$ROOT/android/app/build.gradle' && test -f '$ROOT/android/settings.gradle'"
 check "Kotlin-лаунчер и игра" "test -f '$ROOT/android/app/src/main/java/com/webheadnx/game/LauncherActivity.kt' && test -f '$ROOT/android/app/src/main/java/com/webheadnx/game/GameActivity.kt'"
 check "JNI-мост" "test -f '$ROOT/host/boot/android.c' && grep -q 'Java_com_webheadnx_game_SnxNative' '$ROOT/host/boot/android.c'"
+check "режим выбора пунктов меню" "grep -q 'touch_menu_override' '$ROOT/host/boot/input.c' && grep -q 'JNI_FN(menuMode)' '$ROOT/host/boot/android.c' && grep -q 'fun menuMode' '$ROOT/android/app/src/main/java/com/webheadnx/game/SnxNative.kt' && grep -q 'onMenuMode' '$ROOT/android/app/src/main/java/com/webheadnx/game/TouchControlsView.kt'"
+check "BinkWait в HLE" "grep -q 'hle_binkw32__BinkWait_4' '$ROOT/runtime/hle/bink.c' && ! grep -q 'BinkWait' '$ROOT/platform/headless/stubs.c'"
 check "CMake Android" "test -f '$ROOT/cmake/android.cmake' && grep -q 'SNX_ANDROID_DEPS' '$ROOT/cmake/android.cmake'"
 check "зависимости" "test -x '$ROOT/tools/android_deps.sh' && grep -q 'ffmpeg-src' '$ROOT/tools/android_deps.sh'"
 check "Workflow" "test -f '$ROOT/.github/workflows/android.yml' && grep -q 'SNX_ANDROID_VIDEO' '$ROOT/.github/workflows/android.yml'"

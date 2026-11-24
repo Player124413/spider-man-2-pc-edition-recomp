@@ -1238,6 +1238,9 @@ static struct {
 } g_touch_keys[32];
 static int g_ntouch_keys;
 static volatile int g_touch_menu, g_touch_ready;
+// главное меню Spider-Man 2 рисуется поверх Bink-ролика и не поднимает GUIController ActivePage, поэтому
+// game_menu_open() в нём ложно; лаунчер включает этот флаг кнопкой «Mеню», пока игрок в главном меню.
+static volatile int g_menu_override;
 
 void touch_pad(uint32_t buttons, float lx, float ly, float rx, float ry)
 {
@@ -1270,6 +1273,8 @@ void touch_key(int vk, int down)
 }
 
 int touch_state(void) { return (g_touch_menu ? 1 : 0) | (g_touch_ready ? 2 : 0); }
+
+void touch_menu_override(int on) { g_menu_override = on != 0; }
 
 // оси экранных стиков: поверх физического геймпада — тот, что отклонён сильнее
 static float g_touch_ax[4];
@@ -1384,7 +1389,7 @@ void input_tick(void)
     if (dt > 0.1f)
         dt = 0.1f;
     click_tick();
-    int menu = game_menu_open(NULL);
+    int menu = game_menu_open(NULL) || g_menu_override;
     g_touch_menu = menu;
     if (menu != g_menu) {
         release_all();

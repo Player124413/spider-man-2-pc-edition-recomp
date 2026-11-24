@@ -184,7 +184,8 @@ jobs:
           SO="$RUNNER_TEMP/apk/lib/arm64-v8a/libmain.so"
           "$TC/llvm-nm" -D --defined-only "$SO" > "$RUNNER_TEMP/syms.txt"
           for s in SDL_main Java_com_webheadnx_game_SnxNative_pad Java_com_webheadnx_game_SnxNative_look \
-                   Java_com_webheadnx_game_SnxNative_key Java_com_webheadnx_game_SnxNative_state; do
+                   Java_com_webheadnx_game_SnxNative_key Java_com_webheadnx_game_SnxNative_state \
+                   Java_com_webheadnx_game_SnxNative_menuMode; do
             grep -q " T $s\$" "$RUNNER_TEMP/syms.txt" || { echo "::error::в libmain.so нет $s"; exit 1; }
           done
           "$TC/llvm-readelf" -lW "$SO" | grep LOAD | awk '{ if ($NF != "0x4000") bad=1 } END { exit bad }' \

@@ -49,6 +49,15 @@ JNIEXPORT jint JNICALL JNI_FN(state)(JNIEnv *env, jclass cls)
     return touch_state();
 }
 
+// Главное меню на Bink-заставке: движок не считает его GUI-меню, поэтому лаунчер включает принудительный
+// режим касаний-мыши. В нём экранные кнопки прячутся, а тап по пункту меню уходит в click_at().
+JNIEXPORT void JNICALL JNI_FN(menuMode)(JNIEnv *env, jclass cls, jboolean on)
+{
+    (void)env;
+    (void)cls;
+    touch_menu_override(on ? 1 : 0);
+}
+
 // Частота экрана (режим, выбранный GameActivity под ограничение FPS, или смена частоты системой) и ограничение
 JNIEXPORT void JNICALL JNI_FN(display)(JNIEnv *env, jclass cls, jfloat hz, jint fps_cap)
 {

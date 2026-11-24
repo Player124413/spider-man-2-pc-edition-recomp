@@ -31,6 +31,10 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
     var hiddenByGamepad = false
         set(v) { if (field != v) { field = v; releaseAll(); invalidate() } }
     var onGear: (() -> Unit)? = null
+    var onMenuMode: ((Boolean) -> Unit)? = null
+    // главное меню не поднимает GUIController ActivePage — его нужно включить вручную кнопкой «M» сверху слева
+    var menuMode = false
+        set(v) { if (field != v) { field = v; releaseAll(); onMenuMode?.invoke(v); invalidate() } }
     var onSelect: ((Control?) -> Unit)? = null  // редактор: выбранный элемент
     var onDrag: ((Boolean) -> Unit)? = null      // редактор: элемент тянут пальцем (true) / отпустили (false)
     var onEmptyTap: (() -> Unit)? = null         // редактор: касание пустого места (без сдвига пальца)
@@ -61,7 +65,7 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
     private val rect = RectF()
 
     // ---------------------------------------------------------------- состояние пальцев (игра)
-    private enum class Bind { NONE, CONTROL, LOOK, GEAR, SLOT }
+    private enum class Bind { NONE, CONTROL, LOOK, GEAR, SLOT, MENU }
     // combo — пока палец держал «Зелья», жали другую кнопку (ZL+A и т. п.): тогда при отпускании слот не пьётся
     private class Finger(var bind: Bind = Bind.NONE, var ctl: Control? = null, var lastX: Float = 0f, var lastY: Float = 0f,
                          var combo: Boolean = false)
@@ -84,8 +88,12 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
     private fun gearRadius() = 18f * density
     private fun gearX() = 30f * density
     private fun gearY() = 30f * density
+    private fun menuX() = gearX() + 46f * density
+    private fun menuY() = gearY()
+    private fun menuRadius() = gearRadius()
 
-    private fun active(): Boolean = editMode || (!hiddenByMenu && !hiddenByGamepad && settings.touchEnabled)
+    private fun active(): Boolean = editMode ||
+        (!menuMode && !hiddenByMenu && !hiddenByGamepad && settings.touchEnabled)
 
     // ---------------------------------------------------------------- рисование
     override fun onDraw(canvas: Canvas) {
@@ -110,7 +118,10 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
                 }
             }
         }
-        if (!editMode) drawGear(canvas)
+        if (!editMode) {
+            drawGear(canvas)
+            drawMenuToggle(canvas)
+        }
     }
 
     private fun drawGrid(canvas: Canvas) {
@@ -127,7 +138,7 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
 
     private fun alpha(a: Float) = (a.coerceIn(0f, 1f) * 255).toInt()
 
-    // кнопки и стики — значки в стиле Шрека (WebIcons: SVG-пути, уши огра); у кнопок без значка — надпись
+    // кнопки и стики — значки в стиле Spider-Man (WebIcons: SVG-пути, паутина); у кнопок без значка — надпись
     private fun drawButton(canvas: Canvas, c: Control, a: Float) {
         val pressed = isPressed(c)
         val potion = if (c.id == POTION_ID) PotionIcons.get(settings.potionSlot) else null
@@ -260,6 +271,33 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
         }
     }
 
+    // «M» — режим выбора пунктов меню: касания проходят к SDL, экранные кнопки не рисуются и не ловятся.
+    // Без этого в главном меню (Bink-заставка) кнопки перекрывают пункты «Начать новую игру», «Настройки» и т.д.
+    private fun drawMenuToggle(canvas: Canvas) {
+        val x = menuX(); val y = menuY(); val r = menuRadius()
+        fill.color = if (menuMode) 0xFFE62429.toInt() else 0x000000
+        fill.alpha = if (menuMode) 235 else 110
+        canvas.drawCircle(x, y, r, fill)
+        ring.color = if (menuMode) 0xFFFFFFFF.toInt() else 0xFFE62429.toInt()
+        ring.alpha = if (menuMode) 255 else 200
+        canvas.drawCircle(x, y, r, ring)
+        // стрелка курсора
+        path.reset()
+        path.moveTo(x - r * 0.42f, y - r * 0.52f)
+        path.lineTo(x + r * 0.48f, y - r * 0.04f)
+        path.lineTo(x - r * 0.02f, y + r * 0.06f)
+        path.lineTo(x + r * 0.14f, y + r * 0.54f)
+        path.close()
+        fill.color = 0xFFFFFFFF.toInt()
+        fill.alpha = 255
+        canvas.drawPath(path, fill)
+        nameText.color = if (menuMode) 0x000000 else 0xFFFFFFFF.toInt()
+        nameText.alpha = 255
+        nameText.textSize = 10f * density
+        canvas.drawText("M", x, y + r * 1.7f, nameText)
+        nameText.textSize = 14f * density  // drawSlot использует то же перо для названий зелий
+    }
+
     private fun isPressed(c: Control): Boolean {
         if (c.toggle && c.id in latched) return true
         return fingers.values.any { it.bind == Bind.CONTROL && it.ctl === c }
@@ -274,7 +312,7 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
             MotionEvent.ACTION_DOWN -> {
                 // меню или скрытое управление: касание — не наше (его получит SDL), кроме шестерёнки
                 val x = e.getX(idx); val y = e.getY(idx)
-                if (!onGearAt(x, y) && !active()) return false
+                if (!onGearAt(x, y) && !onMenuAt(x, y) && !active()) return false
                 down(e.getPointerId(idx), x, y)
             }
             MotionEvent.ACTION_POINTER_DOWN -> down(e.getPointerId(idx), e.getX(idx), e.getY(idx))
@@ -288,6 +326,7 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
     }
 
     private fun onGearAt(x: Float, y: Float) = hypot(x - gearX(), y - gearY()) < gearRadius() * 1.6f
+    private fun onMenuAt(x: Float, y: Float) = hypot(x - menuX(), y - menuY()) < menuRadius() * 1.4f
 
     private fun hit(x: Float, y: Float, kinds: Set<Kind>): Control? {
         var best: Control? = null
@@ -315,6 +354,7 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
         val f = Finger(lastX = x, lastY = y)
         fingers[id] = f
         if (onGearAt(x, y)) { f.bind = Bind.GEAR; return }
+        if (onMenuAt(x, y)) { f.bind = Bind.MENU; return }
         if (!active()) return
         val dir = slotArrowAt(x, y)
         if (dir != 0) {
@@ -383,6 +423,10 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
     private fun up(id: Int, x: Float, y: Float) {
         val f = fingers.remove(id) ?: return
         if (f.bind == Bind.GEAR && onGearAt(x, y)) onGear?.invoke()
+        if (f.bind == Bind.MENU && onMenuAt(x, y)) {
+            menuMode = !menuMode
+            buzz()
+        }
         if (f.bind == Bind.SLOT) slotFlash = 0
         val c = f.ctl
         // короткое нажатие «Зелья» без других кнопок — выпить зелье слота
