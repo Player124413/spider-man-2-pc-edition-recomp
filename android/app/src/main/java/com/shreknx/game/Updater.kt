@@ -21,11 +21,12 @@ import java.net.URL
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.zip.ZipFile
 
-// Обновления из GitHub Releases (репозиторий порта): выпуск с APK того же вида, что установлен, и номером сборки
-// больше своего — окно «Доступна версия…» с «Скачать» / «Позже». APK скачивается в кэш приложения, установку
-// подтверждает пользователь (системный установщик; разрешение «Установка неизвестных приложений» — один раз).
-// Имена APK — как в CI (.github/workflows/android.yml, шаг «Имя файла»): Webhead2-eng-0.1.0-<N>.apk — с
-// игрой, webheadNX-nogame-<…>-0.1.0-<N>.apk — без; N — число коммитов (versionName), его и сравниваем.
+// Обновления из GitHub Releases (репозиторий порта): номер сборки больше своего — окно «Доступна версия…»
+// с «Скачать» / «Позже». APK скачивается в кэш приложения, установку подтверждает пользователь (системный
+// установщик; разрешение «Установка неизвестных приложений» — один раз). Имена — как в CI
+// (.github/workflows/android.yml, шаг «Имя файла»): Webhead2-0.1.0-<N>.apk — с игрой,
+// webheadNX-nogame-0.1.0-<N>.apk — без; N — число коммитов (versionName), его и сравниваем. Один APK на обе
+// локализации: eng/rus различаются только файлами игры, выбирать сборку не нужно.
 object Updater {
     const val REPO = "Player124413/spider-man-2-pc-edition-recomp"
     private const val API = "https://api.github.com/repos/$REPO/releases?per_page=15"
@@ -41,13 +42,6 @@ object Updater {
         ZipFile(ctx.applicationInfo.sourceDir).use { z -> (z.getEntry("lib/arm64-v8a/libmain.so")?.size ?: 0L) > 12L * 1024 * 1024 }
     } catch (e: Exception) { true }
 
-    // подходящие виды APK, по предпочтению: английский можно обновить и универсальным (тот же пакет)
-    private fun variants(): List<String> = when (BuildConfig.VARIANT) {
-        "eng" -> listOf("eng")
-        "rus" -> listOf("rus")
-        else -> listOf("eng")
-    }
-
     // сеть — не из главного потока
     fun check(ctx: Context): Release? {
         val c = URL(API).openConnection() as HttpURLConnection
@@ -60,7 +54,6 @@ object Updater {
             val arr = JSONArray(c.inputStream.bufferedReader().readText())
             val prefix = if (hasGame(ctx)) "Webhead2-" else "webheadNX-nogame-"
             var best: Release? = null
-            var bestRank = Int.MAX_VALUE
             for (i in 0 until arr.length()) {
                 val r = arr.getJSONObject(i)
                 if (r.optBoolean("draft") || r.optBoolean("prerelease")) continue
@@ -68,15 +61,12 @@ object Updater {
                 for (j in 0 until assets.length()) {
                     val a = assets.getJSONObject(j)
                     val name = a.optString("name")
-                    for ((rank, v) in variants().withIndex()) {
-                        val m = Regex("^" + Regex.escape(prefix + v + "-") + "[0-9.]+-(\\d+)\\.apk$").find(name) ?: continue
-                        val build = m.groupValues[1].toInt()
-                        val cur = best
-                        if (cur == null || build > cur.build || (build == cur.build && rank < bestRank)) {
-                            best = Release(r.optString("tag_name"), r.optString("body"), name, a.optString("browser_download_url"),
-                                a.optLong("size"), build)
-                            bestRank = rank
-                        }
+                    val m = Regex("^" + Regex.escape(prefix) + "[0-9.]+-(\\d+)\\.apk$").find(name) ?: continue
+                    val build = m.groupValues[1].toInt()
+                    val cur = best
+                    if (cur == null || build > cur.build) {
+                        best = Release(r.optString("tag_name"), r.optString("body"), name, a.optString("browser_download_url"),
+                            a.optLong("size"), build)
                     }
                 }
             }

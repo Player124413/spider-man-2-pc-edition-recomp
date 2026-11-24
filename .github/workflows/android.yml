@@ -1,10 +1,9 @@
-# Сборка APK для Android (docs/ANDROID.md, «Сборка в GitHub Actions»).
+# Сборка APK для Android (docs/ANDROID.md, «Сборка в GitHub Actions»). Один блок, одна ссылка на игру.
 # Без игры (push, PR или «Run workflow» с пустой ссылкой) — APK со всем кодом порта, лаунчером и редактором
-# управления, но без кода игры (SNX_NO_GAME): «Играть» сообщает, что игры в сборке нет. Push и PR собирают
-# английскую сборку; русскую можно запустить вручную.
+# управления, но без кода игры (SNX_NO_GAME): «Играть» сообщает, что игры в сборке нет.
 # С игрой — «Run workflow» со ссылкой на архив своей копии игры (или секрет SNX_GAME_SYSTEM_URL): код игры
 # генерируется рекомпилятором из её System (tools/fetch_game.sh). Английская и русская локализации Spider-Man 2
-# используют один и тот же сгенерированный код, поэтому отдельной универсальной сборки (both/uni) нет.
+# используют один и тот же сгенерированный код: один APK поддерживает оба языка, вариант eng/rus не нужен.
 # Артефакт — сам APK (без zip), подписанный постоянным ключом (android/shreknx-release.jks.b64): новая сборка
 # ставится поверх старой без удаления; versionCode — по времени коммита (растёт с каждым коммитом).
 name: Android APK
@@ -31,11 +30,6 @@ on:
         description: 'Ссылка на архив игры (zip/7z/rar: папка игры или System; прямая, Яндекс Диск, Google Диск, Dropbox). Пусто — APK без игры'
         type: string
         default: ''
-      variant:
-        description: 'Локализация: eng или rus (PE-модули и сгенерированный код общие)'
-        type: choice
-        options: [eng, rus]
-        default: eng
       release:
         description: 'Выпустить APK без игры в GitHub Releases (лаунчер проверяет там обновления). APK с кодом игры не выпускается'
         type: boolean
@@ -77,26 +71,18 @@ jobs:
         run: |
           ev() { jq -r ".inputs.$1 // \"\"" "$GITHUB_EVENT_PATH"; }
           URL=$(ev game_url | tr -d '[:space:]')
-          VARIANT=$(ev variant)
           [ -n "$URL" ] || URL="$SECRET_URL"
           [ -n "$URL" ] && echo "::add-mask::$URL"
-          case "$VARIANT" in rus) ;; *) VARIANT=eng ;; esac
-          # push и PR проверяют английскую сборку; русскую можно собрать вручную («Run workflow» → rus)
-          [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] || VARIANT=eng
           GAME=0
           if [ -n "$URL" ]; then
             GAME=1
             printf %s "$URL" > "$RUNNER_TEMP/game_url"
           fi
-          case "$VARIANT" in rus) PLAT=android-rus; FL=rus ;; *) PLAT=android; FL=eng ;; esac
           {
             echo "game=$GAME"
-            echo "variant=$VARIANT"
-            echo "plat=$PLAT"
-            echo "apk=build/webheadNX-$FL.apk"
-            echo "flavor=$FL"
+            echo "apk=build/webheadNX.apk"
           } >> "$GITHUB_OUTPUT"
-          echo "### Сборка: $([ $GAME = 1 ] && echo "с игрой ($VARIANT)" || echo "без игры")" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Сборка: $([ $GAME = 1 ] && echo "с игрой" || echo "без игры")" >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/checkout@v7
         with:
@@ -143,8 +129,6 @@ jobs:
 
       - name: Игра по ссылке → код рекомпилятора
         if: steps.mode.outputs.game == '1'
-        env:
-          VARIANT: ${{ steps.mode.outputs.variant }}
         run: |
           python3 -m venv tools/.venv
           tools/.venv/bin/python -m pip install -q -r tools/requirements.txt
@@ -154,16 +138,14 @@ jobs:
             time tools/.venv/bin/python -I recomp/main.py gen --game "$2" --out "$3"
             du -sh "$3"
           }
-          # English/Russian — одна и та же PE-копия и один build/gen; менять SNX_VARIANT достаточно при сборке APK
+          # Английская и русская локализации — одна PE-копия и один build/gen
           gen "$RUNNER_TEMP/game_url" game/System build/gen
 
       - name: Сборка APK
         shell: bash
-        env:
-          PLAT: ${{ steps.mode.outputs.plat }}
         run: |
           set -o pipefail
-          tools/build.sh "$PLAT" --no-daemon 2>&1 | tee "$RUNNER_TEMP/build.log"
+          tools/build.sh android --no-daemon 2>&1 | tee "$RUNNER_TEMP/build.log"
 
       - name: Ошибки сборки — в аннотации
         if: failure()
@@ -181,7 +163,6 @@ jobs:
         env:
           APK: ${{ steps.mode.outputs.apk }}
           GAME: ${{ steps.mode.outputs.game }}
-          FLAVOR: ${{ steps.mode.outputs.flavor }}
         run: |
           ls -l "$APK"
           unzip -l "$APK" > "$RUNNER_TEMP/apk.txt"
@@ -230,10 +211,9 @@ jobs:
         env:
           APK: ${{ steps.mode.outputs.apk }}
           GAME: ${{ steps.mode.outputs.game }}
-          VARIANT: ${{ steps.mode.outputs.variant }}
         run: |
           VER=$("$ANDROID_HOME/build-tools/35.0.0/aapt2" dump badging "$APK" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p")
-          if [ "$GAME" = 1 ]; then NAME="Webhead2-$VARIANT-$VER.apk"; DAYS=7; else NAME="webheadNX-nogame-$VARIANT-$VER.apk"; DAYS=14; fi
+          if [ "$GAME" = 1 ]; then NAME="Webhead2-$VER.apk"; DAYS=7; else NAME="webheadNX-nogame-$VER.apk"; DAYS=14; fi
           mkdir -p build/out
           cp "$APK" "build/out/$NAME"
           echo "path=build/out/$NAME" >> "$GITHUB_OUTPUT"
@@ -251,7 +231,7 @@ jobs:
           if-no-files-found: error
 
       # Выпуск для проверки обновлений лаунчером (Updater.kt ищет в выпусках APK с именем
-      # <Webhead2|webheadNX-nogame>-<eng|rus>-<версия>.apk и сравнивает число после последнего «-»). Только APK без
+      # <Webhead2|webheadNX-nogame>-<версия>.apk и сравнивает число после последнего «-»). Только APK без
       # игры: в APK с игрой — переведённый код игры, его не распространяем (AGENTS.md, правило 6).
       - name: Выпуск (GitHub Releases)
         if: github.event_name == 'workflow_dispatch' && inputs.release

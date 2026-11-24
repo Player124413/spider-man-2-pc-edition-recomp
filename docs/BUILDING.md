@@ -163,7 +163,7 @@ PGO — отдельный необязательный этап: [AGENTS.md](..
 
 ```sh
 tools/android_deps.sh --ffmpeg
-tools/build.sh android        # или android-rus
+tools/build.sh android        # один APK на обе локализации
 ```
 
 ## Русская версия
@@ -171,14 +171,11 @@ tools/build.sh android        # или android-rus
 В Spider-Man 2 PC русская локализация — это `.int`-файлы в `System` (например, `Startup.int` в UTF-16
 с кириллицей), а PE-модули (`Webhead.exe`, `Core.dll` и т. д.) те же, что и в английской копии. Отдельной
 генерации `build/gen-rus` не требуется: `cmake/gen.cmake` при `SNX_VARIANT=rus` берёт общий `build/gen`.
-Язык определяется по содержимому `.int`, настройки и сохранения пишутся в отдельный каталог `user-rus`.
+Для Android отдельный `SNX_VARIANT` не нужен вообще — PE-код общий, а язык определяется по содержимому
+`.int`; настройки и сохранения пишутся в отдельный каталог `user-rus`, язык интерфейса — по языку телефона.
 
-```sh
-tools/build.sh android-rus       # -> build/webheadNX-rus.apk (или mac-rus / switch-rus)
-```
-
-Вариант APK (`eng` или `rus`) выбирается при сборке; внутри лаунчер определяет язык по `System/Startup.int`,
-поскольку CRC и дата модулей у локализаций одинаковые.
+Отдельных APK `eng`/`rus` нет: `tools/build.sh android` собирает один `build/webheadNX.apk`. Варианты
+`mac-rus`/`switch-rus` остаются только для платформ, где русская копия требует своей генерации.
 
 ## Частые проблемы
 

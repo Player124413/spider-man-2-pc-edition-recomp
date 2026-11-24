@@ -1,5 +1,5 @@
 // Android-проект webheadNX: лаунчер (Kotlin) + игра (libmain.so из корневого CMakeLists.txt, SDL2).
-// Сборка — tools/build.sh android (или android-rus); вручную: gradle -p android assembleEngRelease.
+// Сборка — tools/build.sh android; вручную: gradle -p android assembleRelease. Один APK на eng и rus.
 pluginManagement {
     repositories {
         google()

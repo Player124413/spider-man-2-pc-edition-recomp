@@ -1,6 +1,7 @@
 // Приложение: лаунчер (com.shreknx.game.LauncherActivity) и игра (GameActivity — SDLActivity в отдельном
 // процессе). Нативная часть — корневой CMakeLists.txt (ANDROID: cmake/android.cmake): libSDL2.so + libmain.so
-// со сгенерированным кодом игры из build/gen (eng) или build/gen-rus (rus).
+// со сгенерированным кодом из build/gen. Один APK на обе локализации: eng/rus различаются только файлами
+// игры (System/*.int), лаунчер определяет язык сам, отдельных flavor'ов нет.
 plugins {
     id 'com.android.application'
     id 'org.jetbrains.kotlin.android'
@@ -50,22 +51,6 @@ android {
                           '-DANDROID_PLATFORM=android-24', '-DCMAKE_BUILD_TYPE=Release'
                 targets 'snx_boot', 'SDL2'
             }
-        }
-    }
-
-    flavorDimensions 'lang'
-    productFlavors {
-        eng {
-            dimension 'lang'
-            resValue 'string', 'app_name', 'Spider-Man 2'
-            buildConfigField 'String', 'VARIANT', '"eng"'
-        }
-        rus {
-            dimension 'lang'
-            applicationIdSuffix '.rus'   // ставится рядом с английской
-            resValue 'string', 'app_name', 'Spider-Man 2'
-            buildConfigField 'String', 'VARIANT', '"rus"'
-            externalNativeBuild { cmake { arguments '-DSNX_VARIANT=rus' } }
         }
     }
 

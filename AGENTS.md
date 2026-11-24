@@ -236,7 +236,7 @@ EXCEPTION_RECORD/CONTEXT на стеке гостя и зовёт цепочку
 
 ```sh
 tools/build.sh mac|mac-rus|switch|switch-rus|switch-pgo [цели]   # каталог build/<вариант>
-tools/android_deps.sh [--ffmpeg] && tools/build.sh android|android-rus   # APK, docs/ANDROID.md (CI: android.yml)
+tools/android_deps.sh [--ffmpeg] && tools/build.sh android              # один APK на eng и rus, docs/ANDROID.md (CI: android.yml)
 tools/.venv/bin/python -I recomp/main.py check --game game/System
 tools/.venv/bin/python -I recomp/main.py discover --game game/System [-j N] [модули]
 tools/.venv/bin/python -I recomp/main.py gen --game game/System --out build/gen [-j N] [модули]

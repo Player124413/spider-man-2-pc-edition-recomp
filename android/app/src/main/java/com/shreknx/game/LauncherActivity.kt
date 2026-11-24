@@ -149,16 +149,10 @@ class LauncherActivity : Activity() {
             refreshStatus()
         }, wrapGap())
         c.addView(row2)
-        if (GameVariant.isUniversal()) {
-            // универсальный APK: в нём код обеих версий игры, по умолчанию версия — по файлам в папке
-            c.addView(Ui.choiceRow(this, L.t("Версия игры", "Game version"),
-                listOf(L.t("Авто", "Auto"), L.t("Английская", "English"), L.t("Русская", "Russian")), s.gameVariant.coerceIn(0, 2)) {
-                s.gameVariant = it
-                refreshStatus()
-            })
-            c.addView(Ui.label(this, L.t("Авто — по файлам игры (Core.dll). Настройки и сохранения у версий раздельные.",
-                "Auto — from the game files (Core.dll). Settings and saves are separate for each version."), dim = true, size = 12f))
-        }
+        c.addView(Ui.label(this, L.t("Один APK поддерживает английскую и русскую игру: язык определяется по " +
+            "System/*.int, сохранения — раздельные. Язык лаунчера — по языку телефона.",
+            "One APK supports both English and Russian: the game language comes from System/*.int, saves are " +
+            "separate. The launcher follows your device language."), dim = true, size = 12f))
         pathLabel = path
         return c
     }
@@ -166,18 +160,11 @@ class LauncherActivity : Activity() {
     private var pathLabel: TextView? = null
     private var variantLabel: TextView? = null
 
-    // «webheadNX 0.1.0-N · русская версия»; у универсального APK — какая версия игры найдена и как определена
+    // «webheadNX 0.1.0-N · игра: русская (System/*.int: ru)» — язык определяется из папки игры
     private fun variantText(): String {
-        if (!GameVariant.isUniversal())
-            return "webheadNX ${BuildConfig.VERSION_NAME} · " +
-                (if (BuildConfig.VARIANT == "rus") L.t("русская версия", "Russian version") else L.t("английская версия", "English version"))
-        val v = GameVariant.effective(this, s)
-        val how = when (s.gameVariant) {
-            1, 2 -> L.t("выбрано вручную", "chosen manually")
-            else -> GameVariant.detect(this, s.gameDir).let { r -> if (r.variant != null) L.t("по файлам игры", "detected from game files") else L.t("не определена — по умолчанию", "not detected — default") }
-        }
-        return "webheadNX ${BuildConfig.VERSION_NAME} · " + L.t("универсальная", "universal") + " · " +
-            L.t("игра: ", "game: ") + GameVariant.label(v) + " ($how)"
+        val r = GameVariant.detect(s.gameDir)
+        val lang = r.variant?.let { GameVariant.label(it) } ?: L.t("не определен", "unknown")
+        return "webheadNX ${BuildConfig.VERSION_NAME} · " + L.t("игра: ", "game: ") + lang + " (${r.how})"
     }
 
     private fun wrapGap() = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
@@ -433,7 +420,7 @@ class LauncherActivity : Activity() {
             }
         }
         val log = Settings.logFile(this)
-        val report = "webheadNX ${BuildConfig.VERSION_NAME} (${Settings.variant(this)}${if (GameVariant.isUniversal()) ", uni: " + GameVariant.detect(this, s.gameDir).how else ""}), ${Build.MANUFACTURER} ${Build.MODEL}, " +
+        val report = "webheadNX ${BuildConfig.VERSION_NAME} (${Settings.language(this)}, ${GameVariant.detect(s.gameDir).how}), ${Build.MANUFACTURER} ${Build.MODEL}, " +
             "Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})\n\n" +
             "===== snx.log (последний запуск) =====\n" + part(log) +
             "\n\n===== snx.log.old (запуск перед ним) =====\n" + part(File(log.path + ".old"))

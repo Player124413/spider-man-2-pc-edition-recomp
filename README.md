@@ -44,7 +44,9 @@ tools/recomp.sh all
 
 Интерактивный Android-порт (SDL2 + GLES3 + OpenAL + Bink/FFmpeg, экранное управление и геймпад) собирается
 из этой же рекомпиляции: `tools/android_deps.sh --ffmpeg && tools/build.sh android` →
-`build/webheadNX-eng.apk`. Требуются JDK 17 и Android SDK/NDK 27; подробности — [docs/ANDROID.md](docs/ANDROID.md).
+`build/webheadNX.apk`. Один APK поддерживает английскую и русскую локализации: язык игры определяется по
+`System/*.int`, язык лаунчера — по языку телефона. Требуются JDK 17 и Android SDK/NDK 27; подробности —
+[docs/ANDROID.md](docs/ANDROID.md).
 
 Переменные окружения: `GAME` (путь к каталогу игры, по умолчанию `references/coolgame`),
 `JOBS` (число параллельных процессов), `GEN` (каталог сгенерированного C), `CC`.

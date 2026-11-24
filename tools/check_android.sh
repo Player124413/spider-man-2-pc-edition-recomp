@@ -15,6 +15,15 @@ check "Workflow" "test -f '$ROOT/.github/workflows/android.yml' && grep -q 'SNX_
 check "имя exe в лаунчере" "grep -q '\"Webhead.exe\"' '$ROOT/android/app/src/main/java/com/shreknx/game/GameFolder.kt'"
 check "нет game.exe в исходниках порта" "! grep -rq 'game.exe' '$ROOT/android/app/src/main/java' '$ROOT/tools/fetch_game.sh'"
 
+# Один APK на обе локализации: никаких eng/rus/both/uni во workflow, Gradle и скрипте сборки
+check "одна ссылка на игру в workflow" "grep -q 'game_url:' '$ROOT/.github/workflows/android.yml' && ! grep -q '^ *variant:' '$ROOT/.github/workflows/android.yml'"
+check "нет вариантов eng/rus/uni в workflow" "! grep -Eq '\[eng, rus\]|game_url_rus|both|android-uni' '$ROOT/.github/workflows/android.yml'"
+check "нет flavor'ов в Gradle" "! grep -q 'productFlavors\|flavorDimensions' '$ROOT/android/app/build.gradle'"
+check "имя приложения в основных ресурсах" "grep -q 'name=\"app_name\"' '$ROOT/android/app/src/main/res/values/strings.xml'"
+check "один APK в tools/build.sh" "grep -q 'assembleRelease' '$ROOT/tools/build.sh' && grep -q 'webheadNX.apk' '$ROOT/tools/build.sh'"
+check "язык определяется лаунчером" "grep -q 'detectLanguage' '$ROOT/android/app/src/main/java/com/shreknx/game/GameVariant.kt' && ! grep -rq 'BuildConfig.VARIANT' '$ROOT/android/app/src/main/java'"
+check "обновление без вариантов" "grep -q 'webheadNX-nogame-' '$ROOT/android/app/src/main/java/com/shreknx/game/Updater.kt' && ! grep -q 'variants()' '$ROOT/android/app/src/main/java/com/shreknx/game/Updater.kt'"
+
 n=$("$ROOT/.venv/bin/python" -c 'import json; print(len(json.load(open("recomp/addrmap.json"))["modules"]))' 2>/dev/null || echo 0)
 check "12 модулей в addrmap.json" "test \"$n\" -eq 12"
 
