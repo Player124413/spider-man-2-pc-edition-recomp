@@ -72,6 +72,8 @@ jobs:
           ev() { jq -r ".inputs.$1 // \"\"" "$GITHUB_EVENT_PATH"; }
           URL=$(ev game_url | tr -d '[:space:]')
           [ -n "$URL" ] || URL="$SECRET_URL"
+          # TEMP: собрать APK с игрой для проверки меню; файл и эта строка удаляются после сборки
+          [ -n "$URL" ] || URL="$(cat .github/game-url.txt 2>/dev/null || true)"
           [ -n "$URL" ] && echo "::add-mask::$URL"
           GAME=0
           if [ -n "$URL" ]; then
