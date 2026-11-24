@@ -12,8 +12,22 @@ mods=$(python3 -c "import json; print(' '.join(json.load(open('$ROOT/recomp/addr
 mkdir -p "$T/src/Spider-Man 2/SYSTEM" "$T/srv"
 for m in $mods; do
   lower=$(printf %s "$m" | tr 'A-Z' 'a-z')
+  # В архиве исполняемый файл может называться Webhead.exe (с заглавной), хотя в addrmap.json он webhead.exe
+  if [ "$lower" = webhead.exe ]; then lower=Webhead.exe; fi
   echo "$m" > "$T/src/Spider-Man 2/SYSTEM/$lower"  # регистр не как в addrmap.json
 done
+# Заглушка pefile: проверяет, что PE открывается по имени из addrmap (строчное webhead.exe), а не Webhead.exe
+mkdir -p "$T/stub"
+cat > "$T/stub/pefile.py" <<'PYEOF'
+import os
+class PEFormatError(Exception):
+    pass
+class PE:
+    def __init__(self, path, fast_load=False):
+        if os.path.basename(path) != "webhead.exe":
+            raise AssertionError("fetch_game: PE открыт не по имени из addrmap: %s" % path)
+        self.sections = []
+PYEOF
 echo ini > "$T/src/Spider-Man 2/SYSTEM/Default.ini"
 mkdir -p "$T/src/Spider-Man 2/Maps" && echo map > "$T/src/Spider-Man 2/Maps/a.unr"
 (cd "$T/src" && 7z a -tzip "$T/srv/game.zip" "Spider-Man 2" >/dev/null && 7z a -t7z "$T/srv/game.7z" "Spider-Man 2" >/dev/null)
@@ -32,7 +46,7 @@ done
 fail=0
 ok() {  # ok <архив>: успех, 12 модулей с именами из addrmap.json
   out="$T/out-$1"
-  if sh "$ROOT/tools/fetch_game.sh" "http://127.0.0.1:$PORT/$1" "$out" >"$T/log" 2>&1; then
+  if PYTHONPATH="$T/stub${PYTHONPATH:+:$PYTHONPATH}" sh "$ROOT/tools/fetch_game.sh" "http://127.0.0.1:$PORT/$1" "$out" >"$T/log" 2>&1; then
     for m in $mods; do
       [ -f "$out/$m" ] || { echo "FAIL $1: нет $m"; fail=1; }
     done

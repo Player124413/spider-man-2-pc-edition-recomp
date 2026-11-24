@@ -59,6 +59,9 @@ have = {f.lower(): f for f in os.listdir(src)}
 missing = [n for n in names if n.lower() not in have]
 if missing:
     sys.exit("fetch_game: в System нет " + ", ".join(missing))
+# В addrmap исполняемый модуль записан как webhead.exe (строчная w), а в архиве он может быть Webhead.exe.
+# Копируем под именем из addrmap и проверяем PE по тому же имени: на Linux регистр важен.
+exe_dst = next(n for n in names if n.lower() == "webhead.exe")
 shutil.rmtree(dst, ignore_errors=True)
 os.makedirs(dst)
 for n in names:
@@ -66,13 +69,13 @@ for n in names:
 try:
     import pefile
     try:
-        pe = pefile.PE(os.path.join(dst, "Webhead.exe"), fast_load=True)
+        pe = pefile.PE(os.path.join(dst, exe_dst), fast_load=True)
     except pefile.PEFormatError as e:
-        sys.exit("fetch_game: Webhead.exe — не исполняемый файл Windows (%s)" % e)
+        sys.exit("fetch_game: %s — не исполняемый файл Windows (%s)" % (exe_dst, e))
     secs = [s.Name.rstrip(b"\0").decode("latin-1") for s in pe.sections]
     if any(x.lower().startswith("stxt") for x in secs):
-        sys.exit("fetch_game: Webhead.exe защищён SafeDisc (секции %s) — положите в System распакованный Webhead.exe"
-                 % ", ".join(secs))
+        sys.exit("fetch_game: %s защищён SafeDisc (секции %s) — положите в System распакованный Webhead.exe"
+                 % (exe_dst, ", ".join(secs)))
 except ImportError:
     pass
 print("fetch_game: %d модулей -> %s" % (len(names), dst))
