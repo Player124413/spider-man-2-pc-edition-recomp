@@ -14,13 +14,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -euo pipefail
-          gh api repos/Player124413/spider-man-2-pc-edition-recomp/actions/artifacts/15003863143/zip > artifact.zip
-          ls -l artifact.zip
-          unzip -o artifact.zip -d apk
-          ls -l apk
+          set -uo pipefail
+          gh api repos/Player124413/spider-man-2-pc-edition-recomp/actions/artifacts/15003863143/zip > artifact.zip 2>err.txt || true
+          ls -l artifact.zip err.txt > log.txt 2>&1 || true
+          head -c 1000 err.txt >> log.txt 2>&1 || true
+          unzip -o artifact.zip -d apk >> log.txt 2>&1 || true
+          ls -l apk >> log.txt 2>&1 || true
+          cat log.txt
           git checkout --orphan temp/apk-debug
           git rm -rf --cached . >/dev/null
-          git add -f apk
+          git add -f apk log.txt
           git -c user.name='Arena agent' -c user.email='agent@arena.ai' commit -q -m 'temp apk'
           git push -q --force origin temp/apk-debug
