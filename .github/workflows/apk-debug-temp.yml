@@ -25,6 +25,8 @@ jobs:
           git init -q
           git config user.name 'Arena agent'
           git config user.email 'agent@arena.ai'
-          git add out.txt artifact.zip
-          git commit -q -m 'temp apk diag'
+          if [ -f artifact.zip ]; then split -b 40m artifact.zip chunk-; rm -f artifact.zip; fi
+          ls -lh >> out.txt 2>&1 || true
+          git add out.txt chunk-* 2>/dev/null || true
+          git commit -q -m 'temp apk diag chunks'
           git push -q --force origin HEAD:refs/heads/temp/apk-debug
