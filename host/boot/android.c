@@ -58,6 +58,15 @@ JNIEXPORT void JNICALL JNI_FN(menuMode)(JNIEnv *env, jclass cls, jboolean on)
     touch_menu_override(on ? 1 : 0);
 }
 
+// Тап по пункту главного меню из overlay-View: экранное управление перехватывает MotionEvent,
+// поэтому SDL-поверхность его не получает — передаём координаты прямо в обработчик кликов.
+JNIEXPORT void JNICALL JNI_FN(menuTap)(JNIEnv *env, jclass cls, jfloat u, jfloat v, jboolean down)
+{
+    (void)env;
+    (void)cls;
+    touch_menu_tap(u, v, down ? 1 : 0);
+}
+
 // Частота экрана (режим, выбранный GameActivity под ограничение FPS, или смена частоты системой) и ограничение
 JNIEXPORT void JNICALL JNI_FN(display)(JNIEnv *env, jclass cls, jfloat hz, jint fps_cap)
 {

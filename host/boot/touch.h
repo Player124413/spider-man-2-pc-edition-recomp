@@ -22,6 +22,9 @@ int touch_state(void);
 // Принудительный «режим меню» для главного меню на Bink-заставке: движок его не считает GUI-меню
 // (GUIController ActivePage пуст), поэтому касания надо передавать в обработчик кликов мыши принудительно.
 void touch_menu_override(int on);
+// Тап по главному меню на Bink-заставке: доли окна и признак нажатия. Применяется в input_tick в главном
+// потоке, чтобы клик уходил в гостя сразу, без ожидания GUIController (в главном меню его ActivePage пуст).
+void touch_menu_tap(float u, float v, int down);
 
 #ifdef __cplusplus
 }

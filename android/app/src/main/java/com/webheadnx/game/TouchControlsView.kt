@@ -69,7 +69,7 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
     private val rect = RectF()
 
     // ---------------------------------------------------------------- состояние пальцев (игра)
-    private enum class Bind { NONE, CONTROL, LOOK, GEAR, SLOT, MENU }
+    private enum class Bind { NONE, CONTROL, LOOK, GEAR, SLOT, MENU, MENU_TAP }
     // combo — пока палец держал «Зелья», жали другую кнопку (ZL+A и т. п.): тогда при отпускании слот не пьётся
     private class Finger(var bind: Bind = Bind.NONE, var ctl: Control? = null, var lastX: Float = 0f, var lastY: Float = 0f,
                          var combo: Boolean = false)
@@ -96,10 +96,14 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
     private fun menuY() = gearY()
     private fun menuRadius() = gearRadius()
 
+    // passThroughMenu не отключает кнопки: они остаются видимыми и нажимаемыми, а тапы по пустому
+    // месту идут в меню через SnxNative.menuTap (SDL-поверхность под этим View их не получит).
     private fun active(): Boolean = editMode ||
-        (!menuMode && !passThroughMenu && !hiddenByMenu && !hiddenByGamepad && settings.touchEnabled)
+        (!menuMode && !hiddenByMenu && !hiddenByGamepad && settings.touchEnabled)
     private fun controlsVisible(): Boolean = editMode ||
         (!hiddenByMenu && !hiddenByGamepad && settings.touchEnabled)
+    private fun menuTapAt(x: Float, y: Float): Boolean = menuMode ||
+        (passThroughMenu && hit(x, y, ALL_KINDS) == null && slotArrowAt(x, y) == 0 && floatingStickAt(x) == null)
 
     // ---------------------------------------------------------------- рисование
     override fun onDraw(canvas: Canvas) {
@@ -317,11 +321,7 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 val x = e.getX(idx); val y = e.getY(idx)
-                if (!onGearAt(x, y) && !onMenuAt(x, y)) {
-                    if (passThroughMenu && hit(x, y, ALL_KINDS) == null && slotArrowAt(x, y) == 0 &&
-                        floatingStickAt(x) == null) return false  // пустое место — тап по пункту меню в SDL
-                    if (!active()) return false
-                }
+                if (!onGearAt(x, y) && !onMenuAt(x, y) && !menuTapAt(x, y) && !active()) return false
                 down(e.getPointerId(idx), x, y)
             }
             MotionEvent.ACTION_POINTER_DOWN -> down(e.getPointerId(idx), e.getX(idx), e.getY(idx))
@@ -364,8 +364,11 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
         fingers[id] = f
         if (onGearAt(x, y)) { f.bind = Bind.GEAR; return }
         if (onMenuAt(x, y)) { f.bind = Bind.MENU; return }
-        if (passThroughMenu && hit(x, y, ALL_KINDS) == null && slotArrowAt(x, y) == 0 &&
-            floatingStickAt(x) == null) return  // палец ушёл с кнопки на фон — дальше тап обработает SDL
+        if (menuTapAt(x, y)) {
+            f.bind = Bind.MENU_TAP
+            SnxNative.menuTap(x / max(1f, w()), y / max(1f, h()), true)
+            return
+        }
         if (!active()) return
         val dir = slotArrowAt(x, y)
         if (dir != 0) {
@@ -433,6 +436,10 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
 
     private fun up(id: Int, x: Float, y: Float) {
         val f = fingers.remove(id) ?: return
+        if (f.bind == Bind.MENU_TAP) {
+            SnxNative.menuTap(x / max(1f, w()), y / max(1f, h()), false)
+            return
+        }
         if (f.bind == Bind.GEAR && onGearAt(x, y)) onGear?.invoke()
         if (f.bind == Bind.MENU && onMenuAt(x, y)) {
             menuMode = !menuMode
@@ -516,6 +523,8 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
     }
 
     fun releaseAll() {
+        for (f in fingers.values)
+            if (f.bind == Bind.MENU_TAP) SnxNative.menuTap(f.lastX / max(1f, w()), f.lastY / max(1f, h()), false)
         fingers.clear()
         sticks.values.forEach { it.pointer = -1; it.vx = 0f; it.vy = 0f }
         dpadMask = 0

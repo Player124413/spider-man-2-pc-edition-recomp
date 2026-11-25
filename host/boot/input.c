@@ -91,6 +91,9 @@ static u32 vk_of(SDL_Scancode sc)
 
 static u32 g_buttons;              // MK_LBUTTON 1, MK_RBUTTON 2, MK_MBUTTON 0x10
 static float g_cu = 0.5f, g_cv = 0.5f;  // курсор в долях окна (мышь хоста или правый стик)
+// главное меню на Bink-заставке: GUIController.ActivePage пуст, поэтому клик нельзя ждать через
+// game_menu_point_done() — его посылаем сразу (иначе пункты «Начать новую игру» не нажимаются)
+static volatile int g_bink_menu;
 
 // курсор (доли окна) -> координаты заднего буфера гостя
 static u32 cursor_lparam(void)
@@ -621,8 +624,15 @@ static void click_at(float x, float y)
     if (g_click_state == 2)
         mouse_button(0, 0, cursor_lparam());
     sync_cursor(x, y);
-    g_click_ticket = game_menu_point(x, y);
-    g_click_state = 1;
+    if (g_bink_menu) {
+        // Bink-меню игры не поднимает GUIController: ждать game_menu_point_done() бессмысленно —
+        // GUI не пришлёт кадр, и клик никогда не будет послан. Нажимаем сразу в точке касания.
+        mouse_button(0, 1, cursor_lparam());
+        g_click_state = 2;
+    } else {
+        g_click_ticket = game_menu_point(x, y);
+        g_click_state = 1;
+    }
     g_click_up = 0;
 }
 
@@ -1238,6 +1248,11 @@ static struct {
     char down;
 } g_touch_keys[32];
 static int g_ntouch_keys;
+static struct {
+    float u, v;
+    char down;
+} g_touch_taps[8];
+static int g_ntouch_taps;
 static volatile int g_touch_menu, g_touch_ready, g_touch_menu_pass;
 // главное меню Spider-Man 2 рисуется поверх Bink-ролика и не поднимает GUIController ActivePage, поэтому
 // game_menu_open() в нём ложно; лаунчер включает этот флаг кнопкой «Mеню», пока игрок в главном меню.
@@ -1281,6 +1296,44 @@ int touch_state(void)
 }
 
 void touch_menu_override(int on) { g_menu_override = on != 0; }
+
+// Тап по пустому месту экрана в главном меню приходит из лаунчера через JNI (overlay-View перехватывает
+// касание, поэтому SDL-поверхность его не видит). Кладём в очередь и применяем в главном потоке.
+void touch_menu_tap(float u, float v, int down)
+{
+    pthread_mutex_lock(&g_touch_lock);
+    if (g_ntouch_taps < 8) {
+        g_touch_taps[g_ntouch_taps].u = u;
+        g_touch_taps[g_ntouch_taps].v = v;
+        g_touch_taps[g_ntouch_taps].down = (char)(down != 0);
+        g_ntouch_taps++;
+    }
+    pthread_mutex_unlock(&g_touch_lock);
+}
+
+static void apply_touch_taps(int menu)
+{
+    struct {
+        float u, v;
+        char down;
+    } taps[8];
+    int n;
+    pthread_mutex_lock(&g_touch_lock);
+    n = g_ntouch_taps;
+    if (n > 8)
+        n = 8;
+    memcpy(taps, g_touch_taps, (size_t)n * sizeof taps[0]);
+    g_ntouch_taps = 0;
+    pthread_mutex_unlock(&g_touch_lock);
+    if (!menu)
+        return;
+    for (int i = 0; i < n; i++) {
+        if (taps[i].down)
+            touch(taps[i].u, taps[i].v);
+        else
+            click_release();
+    }
+}
 
 // оси экранных стиков: поверх физического геймпада — тот, что отклонён сильнее
 static float g_touch_ax[4];
@@ -1401,6 +1454,7 @@ void input_tick(void)
     int menu = gui_menu || g_menu_override || bink_menu_movie_active();
     g_touch_menu = gui_menu;      // только настоящее GUI-меню прячет экранные кнопки
     g_touch_menu_pass = menu;     // главное меню на ролике: касания мышью, но кнопки видны
+    g_bink_menu = !gui_menu && menu;
     if (menu != g_menu) {
         release_all();
         g_menu = menu;
@@ -1408,6 +1462,7 @@ void input_tick(void)
         if (!menu)
             g_joy_frozen = 0;
     }
+    apply_touch_taps(menu);       // тапы из overlay-View идут в click_at сразу, без SDL_FINGERDOWN
     // курки -> кнопки ZL/ZR
     for (int i = 0; i < 2; i++) {
         int on = pad_axis(SDL_CONTROLLER_AXIS_TRIGGERLEFT + i) > (g_trig[i] ? 0.3f : 0.5f);

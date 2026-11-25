@@ -13,6 +13,7 @@ check "режим выбора пунктов меню" "grep -q 'touch_menu_ove
 check "BinkWait в HLE" "grep -q 'hle_binkw32__BinkWait_4' '$ROOT/runtime/hle/bink.c' && ! grep -q 'BinkWait' '$ROOT/platform/headless/stubs.c'"
 check "меню только на заставке" "grep -q 'bink_menu_movie_active' '$ROOT/runtime/hle/bink.c' && grep -q 'bink_menu_movie_active()' '$ROOT/host/boot/input.c' && grep -q 'Marvel.bik' '$ROOT/runtime/hle/bink.c'"
 check "кнопки в главном меню" "grep -q 'STATE_MENU_PASS' '$ROOT/android/app/src/main/java/com/webheadnx/game/SnxNative.kt' && grep -q 'passThroughMenu' '$ROOT/android/app/src/main/java/com/webheadnx/game/TouchControlsView.kt' && grep -q 'controlsVisible' '$ROOT/android/app/src/main/java/com/webheadnx/game/TouchControlsView.kt'"
+check "тапы в Bink-меню" "grep -q 'touch_menu_tap' '$ROOT/host/boot/touch.h' && grep -q 'JNI_FN(menuTap)' '$ROOT/host/boot/android.c' && grep -q 'fun menuTap' '$ROOT/android/app/src/main/java/com/webheadnx/game/SnxNative.kt' && grep -q 'SnxNative.menuTap' '$ROOT/android/app/src/main/java/com/webheadnx/game/TouchControlsView.kt' && grep -q 'g_bink_menu' '$ROOT/host/boot/input.c'"
 check "CMake Android" "test -f '$ROOT/cmake/android.cmake' && grep -q 'SNX_ANDROID_DEPS' '$ROOT/cmake/android.cmake'"
 check "зависимости" "test -x '$ROOT/tools/android_deps.sh' && grep -q 'ffmpeg-src' '$ROOT/tools/android_deps.sh'"
 check "Workflow" "test -f '$ROOT/.github/workflows/android.yml' && grep -q 'SNX_ANDROID_VIDEO' '$ROOT/.github/workflows/android.yml'"
