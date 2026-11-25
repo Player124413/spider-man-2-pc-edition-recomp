@@ -254,6 +254,9 @@ static char g_snx_path[1100];
 static u32 g_map[2][PB_N];  // [слой][кнопка] -> виртуальная клавиша или T_*; 0 — джойстик (в слое — ничего)
 static u32 g_held[PB_N];    // что нажала кнопка: отпускается то же, даже если сменились слой или режим
 static int g_layer_btn = -1, g_layer, g_menu;
+// Ввод игры заморожен: настоящее GUI-меню игры или явный режим «Меню». Заставка главного меню и её защёлка
+// (g_menu_latch) только переводят касания в мышь (g_touch_menu_pass) — стик, кнопки и камера при этом живут.
+static int g_input_frozen;
 static float g_move_speed = 1200.0f, g_cam_speed = 72.0f, g_dead = 0.15f;
 static int g_invert_y;
 // Камера правым стиком: 1 — смещениями мыши DirectInput (как камера пальцем), 0 — осью джойстика JoyU/JoyV.
@@ -1554,7 +1557,7 @@ static void touch_tick(void)
         key((u32)vks[i], downs[i]);
     // камера пальцем: смещение мыши DirectInput (в меню — не нужно, там касание — щелчок)
     static float rx_, ry_;
-    if (!g_menu && (look_x != 0.0f || look_y != 0.0f)) {
+    if (!g_input_frozen && (look_x != 0.0f || look_y != 0.0f)) {
         rx_ += look_x;
         ry_ += (g_invert_y ? -look_y : look_y);
         int dx = (int)rx_, dy = (int)ry_;
@@ -1612,10 +1615,27 @@ void input_tick(void)
     // (Options/Credits внутри меню) не должен её снимать: иначе после возврата мышь «зависает».
     if (game_player_active())
         g_menu_latch = 0;
+    // Защёлка нужна только во фронт-энде. Открылось настоящее GUI-меню или пошёл игровой ролик (вступление,
+    // катсцена) — игра уже не в главном меню, и защёлка лишь ловила бы тапы как клики ЛКМ в геймплее.
+    if (gui_menu || bink_game_movie_active())
+        g_menu_latch = 0;
     int menu = gui_menu || g_menu_override || menu_movie || g_menu_latch;
+    // Замораживает ввод игры только настоящее GUI-меню и явный режим «Меню». Заставка главного меню и защёлка
+    // нужны лишь для того, чтобы касания по пустому месту шли в мышь: если защёлка не снимется (игра не сообщила
+    // о пешке), заморозка оставляла игру без стика, кнопок и камеры — персонажем нельзя было управлять.
+    int frozen = gui_menu || g_menu_override;
     g_touch_menu = gui_menu;      // только настоящее GUI-меню прячет экранные кнопки
     g_touch_menu_pass = menu;     // главное меню на ролике: касания мышью, но кнопки видны
     g_bink_menu = !gui_menu && menu;
+    if (frozen != g_input_frozen) {
+        release_all();
+        g_input_frozen = frozen;
+        if (!frozen)
+            g_joy_frozen = 0;
+        if (log_touch())
+            fprintf(stderr, "[touch] input %s (gui=%d override=%d movie=%d latch=%d)\n",
+                    frozen ? "frozen" : "live", gui_menu, g_menu_override, menu_movie, g_menu_latch);
+    }
     if (menu != g_menu) {
         release_all();
         g_menu = menu;
@@ -1646,7 +1666,7 @@ void input_tick(void)
     float lx, ly, rx, ry;
     stick(axis_of(SDL_CONTROLLER_AXIS_LEFTX), axis_of(SDL_CONTROLLER_AXIS_LEFTY), 0, &lx, &ly);
     stick(axis_of(SDL_CONTROLLER_AXIS_RIGHTX), axis_of(SDL_CONTROLLER_AXIS_RIGHTY), 1, &rx, &ry);
-    if (!g_menu) {
+    if (!g_input_frozen) {
         // джойстик: lX lY — левый стик, lRy lRz (JoyU, JoyV) — правый; крестовина — POV
         static const int pov_of[16] = {-1, 0, 18000, -1, 27000, 31500, 22500, 27000,
                                        9000, 4500, 13500, 9000, -1, 0, 18000, -1};
