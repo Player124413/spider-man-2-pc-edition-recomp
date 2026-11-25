@@ -33,6 +33,12 @@ OVERRIDES["msvcr71.dll!srand"] = ("ovr_crt_srand", 0)
 # msvcr71: нативный qsort (runtime/overrides_crt.c)
 WRAPS["msvcr71.dll!qsort"] = ("ovr_crt_qsort", 0)
 
+# Core.dll: FArray::Remove(Index, Count, ElementSize). В движке нет проверки Count: кривой/короткий
+# файл сохраненияgame*.ini заставляет парсер меню «Загрузить игру» вызвать Remove(0, N) на пустом
+# массиве; (Num-Index-Count)*Size уходит в memmove отрицательным числом и игра умирает GPF
+# (Webhead.dll -> msvcr71!memmove). Хостовая замена обрезает Count до реального числа элементов.
+OVERRIDES["Core.dll!?Remove@?$_FArray@X@@QAEXHHH@Z"] = ("ovr_core_farray_remove", 0)
+
 
 def _match_sig(img, sig):
     rx = re.compile(b"".join(b"." if p == "?" else re.escape(bytes([int(p, 16)])) for p in sig.split()), re.S)

@@ -643,3 +643,35 @@ void ovr_core_vec_normalize(CPU *c)
     c->eax = vec_normalize_apply(m, v);
     c->esp += 4u;  // thiscall без аргументов: ret
 }
+
+// ---------------------------------------------------------------- FArray::Remove: защита от отрицательного memmove
+// UE2 вызывается при разборе DOS-строк, в том числе файлов сохранений game*.ini в меню «Загрузить игру».
+// Оригинал не проверяет Count и считает байты для memmove как (ArrayNum-Index-Count)*ElementSize;
+// при Count > ArrayNum-Index размер становится отрицательным, и guest-падает внутри msvcr71!memmove.
+// Замена сохраняет обычную семантику Remove, но обрезает Count и не трогает указатель/ёмкость массива.
+void ovr_core_farray_remove(CPU *c)
+{
+    u8 *m = g_mem;
+    u32 self = c->ecx;
+    s32 index = (s32)rd32(m, c->esp + 4);
+    s32 count = (s32)rd32(m, c->esp + 8);
+    s32 elem = (s32)rd32(m, c->esp + 12);
+    u32 num = rd32(m, self + 4);
+    u32 data = rd32(m, self);
+    if (index < 0 || count <= 0 || elem <= 0 || elem > 4096 || (u32)index >= num) {
+        c->esp += 16;  // thiscall, три аргумента: ret 12 (4+12)
+        return;
+    }
+    if ((u32)count > num - (u32)index) {
+        static unsigned clamps;
+        if (clamps++ < 16)
+            fprintf(stderr, "[core] FArray::Remove clamp: idx=%d cnt=%d num=%u elem=%d\n", index, count, num, elem);
+        count = (s32)(num - (u32)index);
+    }
+    size_t bytes = (size_t)(num - (u32)index - (u32)count) * (size_t)elem;
+    if (bytes && data && (u64)data + (u64)((u32)index + (u32)count) * (u64)elem + bytes <= RT_WINDOW)
+        memmove(m + data + (u32)index * (u32)elem,
+                m + data + ((u32)index + (u32)count) * (u32)elem, bytes);
+    wr32(m, self + 4, num - (u32)count);
+    c->esp += 16;  // thiscall: ret 12
+}
