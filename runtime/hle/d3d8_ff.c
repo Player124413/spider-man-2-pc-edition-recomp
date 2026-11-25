@@ -2912,8 +2912,8 @@ static void hitch_check(d3ddev *d)
 }
 
 // Ролик, кадр которого игра не вывела в задний буфер (больше кадра: 800x600 в 1200x540 и т. п. — D3DDrv тогда
-// кадр не копирует, остаются звук и чёрный экран): порт рисует текущий кадр ролика сам, вписанным в задний буфер с
-// чёрными полями, как write_movie (d3d8_res.c). Если игра сама выводит кадры ролика (write_movie за последние
+// кадр не копирует, остаются звук и чёрный экран): порт рисует текущий кадр ролика сам, растянутым на весь задний
+// буфер, как write_movie (d3d8_res.c). Если игра сама выводит кадры ролика (write_movie за последние
 // 250 мс) — ничего. Кадр берётся в потоке гостя (bink.c), рисуется командой в потоке рендера (копия пикселей).
 typedef struct {
     d3ddev *d;
@@ -2956,13 +2956,9 @@ static void x_movie_overlay(void *p)
         d3d8_fbo_attach(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, bb);
         glDisable(GL_SCISSOR_TEST);
         glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-        glClearColor(0, 0, 0, 1);
-        glClear(GL_COLOR_BUFFER_BIT);
+        // Растягиваем ролик на весь кадр: 4:3-видео на широком экране без чёрных полей (на 16:9 — ровно 16:9).
         GLint W = (GLint)bb->w, H = (GLint)bb->h;
-        float sc = fminf((float)W / (float)q->w, (float)H / (float)q->h);
-        GLint w = (GLint)((float)q->w * sc), h = (GLint)((float)q->h * sc);
-        glBlitFramebuffer(0, 0, (GLint)q->w, (GLint)q->h, (W - w) / 2, (H - h) / 2, (W - w) / 2 + w, (H - h) / 2 + h,
-                          GL_COLOR_BUFFER_BIT, GL_LINEAR);
+        glBlitFramebuffer(0, 0, (GLint)q->w, (GLint)q->h, 0, 0, W, H, GL_COLOR_BUFFER_BIT, GL_LINEAR);
         glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
         glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
         glFramebufferRenderbuffer(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, 0);

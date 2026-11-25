@@ -376,8 +376,8 @@ static u32 surf_lock(d3dsurf *s, u32 locked_rect, u32 rect, u32 flags)
 u64 g_movie_drawn_ns, g_movie_overlay_ns;
 
 // Кадр ролика Bink (d3d8_movie_frame: D3DDrv выводит его прямо в залоченный задний буфер): только его
-// прямоугольник — в постоянную текстуру и blit в цель, растянутый с сохранением пропорций (на ПК 640x480/800x600
-// почти занимали экран, а в 1920x1080 были бы окошком), поля вокруг — чёрные.
+// прямоугольник — в постоянную текстуру и blit в цель, растянутый на весь кадр (ролики игры 640x480/800x600
+// в 4:3; на широком экране их растягивают по ширине, без чёрных полей по бокам — так удобнее смотреть).
 // 0 — прямоугольник вне блокировки (тогда — обычный путь)
 static int write_movie(d3dsurf *s, const d3dfmt *f)
 {
@@ -407,18 +407,8 @@ static int write_movie(d3dsurf *s, const d3dfmt *f)
     d3d8_fbo_attach(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, s);
     glDisable(GL_SCISSOR_TEST);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-    float sc = fminf((float)W / (float)mw, (float)H / (float)mh);
-    if (sc > 1.05f) {
-        GLint w = (GLint)((float)mw * sc), h = (GLint)((float)mh * sc);
-        if (w < W || h < H) {
-            // поля вокруг — чёрные, как на ПК в 4:3, где ролик закрывал экран (иначе на 16:9 по бокам — мир под ним)
-            glClearColor(0, 0, 0, 1);
-            glClear(GL_COLOR_BUFFER_BIT);
-        }
-        glBlitFramebuffer(0, 0, mw, mh, (W - w) / 2, (H - h) / 2, (W - w) / 2 + w, (H - h) / 2 + h,
-                          GL_COLOR_BUFFER_BIT, GL_LINEAR);
-    } else
-        glBlitFramebuffer(0, 0, mw, mh, mx, my, mx + mw, my + mh, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    // Растягиваем ролик на весь кадр: 4:3-видео на широком экране без чёрных полей (на 16:9 — ровно 16:9).
+    glBlitFramebuffer(0, 0, mw, mh, 0, 0, W, H, GL_COLOR_BUFFER_BIT, GL_LINEAR);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glDeleteFramebuffers(2, fb);
     d3d8_bind_target(d3d8_dev());  // и маски/scissor — заново перед следующей отрисовкой
