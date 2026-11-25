@@ -262,7 +262,7 @@ static void make_key(const d3d_rstate *d, const vdecl *decl, ffkey *k)
         }
         sk->tex = d->tex[s] ? (u8)(d->tex[s]->cube ? 2 : 1) : 0;
         sk->tci = (u8)(t[11] & 7);
-        sk->tcgen = (u8)((t[11] >> 16) & 3);
+        sk->tcgen = (u8)((t[11] >> 16) & 7);  // 1..4: NORMAL, POSITION, REFLECTION, SPHEREMAP
         sk->ttf_count = (u8)(t[24] & 7);
         sk->ttf_proj = (t[24] & 0x100) != 0;
         nst = s + 1;
@@ -386,7 +386,7 @@ static void gen_vs(const ffkey *k, sbuf *b)
     }
     int need_en = k->lighting;
     for (int s = 0; s < k->nstages; s++)
-        need_en |= k->st[s].tcgen == 1 || k->st[s].tcgen == 3;
+        need_en |= k->st[s].tcgen == 1 || k->st[s].tcgen == 3 || k->st[s].tcgen == 4;
     if (need_en && !k->rhw)
         put(b, "  vec3 En = %s;\n", (k->inputs & (1u << 3)) ? "u_nrm_mat * a_nrm" : "vec3(0.0)");
     const char *c0 = (k->inputs & (1u << 5)) ? "a_col0" : "vec4(1.0)";
@@ -471,6 +471,15 @@ static void gen_vs(const ffkey *k, sbuf *b)
                        : "reflect(dot(epos.xyz, epos.xyz) > 0.0 ? normalize(epos.xyz) : vec3(0.0, 0.0, 1.0), "
                          "dot(En, En) > 0.0 ? normalize(En) : vec3(0.0, 0.0, 1.0))");
             n = 3;
+            break;
+        case 4:  // SPHEREMAP: u,v = 0.5 + 0.5 * n.xy / sqrt(nx^2 + ny^2 + (nz + 1)^2)
+            put(b, "  vec3 sm = %s;\n",
+                k->rhw ? "vec3(0.0, 0.0, 1.0)"
+                       : "(dot(En, En) > 0.0 ? normalize(En) : vec3(0.0, 0.0, 1.0))");
+            put(b, "  float sd = sqrt(sm.x * sm.x + sm.y * sm.y + (sm.z + 1.0) * (sm.z + 1.0));\n"
+                   "  float si = sd > 1e-6 ? 0.5 / sd : 0.0;\n");
+            put(b, "  vec4 tc%d = vec4(sm.x * si + 0.5, sm.y * si + 0.5, 0.0, 1.0);\n", s);
+            n = 2;
             break;
         default:
             n = k->tcsize[sk->tci];
