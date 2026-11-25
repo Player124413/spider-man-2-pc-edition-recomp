@@ -72,7 +72,6 @@ jobs:
           ev() { jq -r ".inputs.$1 // \"\"" "$GITHUB_EVENT_PATH"; }
           URL=$(ev game_url | tr -d '[:space:]')
           [ -n "$URL" ] || URL="$SECRET_URL"
-          [ -n "$URL" ] || URL="https://codeload.github.com/Player124413/spider-man-2-pc-edition-recomp/tar.gz/refs/heads/temp/game-src"
           [ -n "$URL" ] && echo "::add-mask::$URL"
           GAME=0
           if [ -n "$URL" ]; then
@@ -131,8 +130,6 @@ jobs:
       - name: Игра по ссылке → код рекомпилятора
         if: steps.mode.outputs.game == '1'
         run: |
-          set -o pipefail
-          {
           python3 -m venv tools/.venv
           tools/.venv/bin/python -m pip install -q -r tools/requirements.txt
           gen() {  # gen <файл со ссылкой> <System> <каталог кода>
@@ -143,20 +140,6 @@ jobs:
           }
           # Английская и русская локализации — одна PE-копия и один build/gen
           gen "$RUNNER_TEMP/game_url" game/System build/gen
-          } 2>&1 | tee "$RUNNER_TEMP/gen.log"
-
-      - name: "TEMP - лог генерации"
-        if: always() && steps.mode.outputs.game == '1'
-        run: |
-          mkdir -p /tmp/genlog
-          cp "$RUNNER_TEMP/gen.log" /tmp/genlog/log.txt 2>/dev/null || echo "no log" > /tmp/genlog/log.txt
-          cd /tmp/genlog
-          git init -q
-          git config user.name 'Arena agent'
-          git config user.email 'agent@arena.ai'
-          git add log.txt
-          git commit -q -m 'temp gen log'
-          git push -q --force origin HEAD:refs/heads/temp/gen-log
 
       - name: Сборка APK
         shell: bash
