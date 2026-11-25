@@ -177,9 +177,13 @@ jobs:
           "$BT/apksigner" verify --verbose --min-sdk-version 21 --max-sdk-version 23 "$APK" > "$RUNNER_TEMP/cert_v1.txt"
           grep -Fq "Verified using v1 scheme (JAR signing): true" "$RUNNER_TEMP/cert_v1.txt" \
             || { echo "::error::нет JAR-подписи v1"; cat "$RUNNER_TEMP/cert_v1.txt"; exit 1; }
-          for f in META-INF/MANIFEST.MF META-INF/WEBHEAD2.SF META-INF/WEBHEAD2.RSA; do
-            grep -q " $f\$" "$RUNNER_TEMP/apk.txt" || { echo "::error::в APK нет $f"; exit 1; }
-          done
+          unzip -Z1 "$APK" > "$RUNNER_TEMP/apk-names.txt"
+          grep -qx 'META-INF/MANIFEST.MF' "$RUNNER_TEMP/apk-names.txt" \
+            || { echo "::error::в APK нет META-INF/MANIFEST.MF"; exit 1; }
+          grep -Eq '^META-INF/[^/]+\.SF$' "$RUNNER_TEMP/apk-names.txt" \
+            || { echo "::error::в APK нет META-INF/*.SF"; exit 1; }
+          grep -Eq '^META-INF/[^/]+\.RSA$' "$RUNNER_TEMP/apk-names.txt" \
+            || { echo "::error::в APK нет META-INF/*.RSA"; exit 1; }
           for s in "Verified using v2 scheme (APK Signature Scheme v2): true" \
                    "Verified using v3 scheme (APK Signature Scheme v3): true"; do
             grep -Fq "$s" "$RUNNER_TEMP/cert.txt" || { echo "::error::$s"; exit 1; }
