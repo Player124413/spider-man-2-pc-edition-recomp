@@ -25,6 +25,7 @@
 #include "runtime/hle/overlay.h"
 #include "runtime/hle/user32.h"
 #include "runtime/game/menu.h"
+#include "runtime/game/rumble.h"
 #include "runtime/rt.h"
 
 extern void (*hle_rumble_hook)(u16 low, u16 high, u32 ms);  // runtime/hle/misc.c
@@ -1278,6 +1279,9 @@ static struct {
 } g_touch_taps[8];
 static int g_ntouch_taps;
 static volatile int g_touch_menu, g_touch_ready, g_touch_menu_pass;
+// главное меню остаётся на экране и после того, как Bink-ролик доиграл: держим режим меню, пока не
+// появится пешка игрока (реально началась игра). Иначе экранные стики правят персонажем в меню.
+static volatile int g_menu_latch;
 // главное меню Spider-Man 2 рисуется поверх Bink-ролика и не поднимает GUIController ActivePage, поэтому
 // game_menu_open() в нём ложно; лаунчер включает этот флаг кнопкой «Mеню», пока игрок в главном меню.
 static volatile int g_menu_override;
@@ -1396,9 +1400,9 @@ static void diag_tick(void)
     dinput8_stats(st);
     int x = 0, y = 0;
     int ready = d3d8_window_to_target(0.5f, 0.5f, &x, &y);
-    fprintf(stderr, "[touch] t=%us ticks=%u focus=%x menu=%d ready=%d center=%d,%d pad=%u taps=%u buttons=%x "
+    fprintf(stderr, "[touch] t=%us ticks=%u focus=%x menu=%d latch=%d ready=%d center=%d,%d pad=%u taps=%u buttons=%x "
                     "lx=%.2f ly=%.2f | dinput: mouse %u joy %u unacquired %u acquire %u\n",
-            now / 1000, g_diag_ticks, user32_focus(), g_menu, ready, x, y, g_diag_pad, g_diag_taps, g_touch_applied,
+            now / 1000, g_diag_ticks, user32_focus(), g_menu, g_menu_latch, ready, x, y, g_diag_pad, g_diag_taps, g_touch_applied,
             (double)g_touch_ax[0], (double)g_touch_ax[1], st[0], st[1], st[2], st[3]);
     for (int i = 0; i < MAX_PADS; i++)  // геймпады: правый стик сейчас и число событий осей (камера «пропадает»)
         if (g_pads[i].id >= 0 && g_pads[i].events)
@@ -1490,7 +1494,14 @@ void input_tick(void)
     // главное меню Spider-Man 2 — Bink-заставка без GUIController: без этого признака касания
     // перехватываются экранным геймпадом и пункты «Начать новую игру» не нажимаются
     int gui_menu = game_menu_open(NULL);
-    int menu = gui_menu || g_menu_override || bink_menu_movie_active();
+    int menu_movie = bink_menu_movie_active();
+    if (menu_movie)
+        g_menu_latch = 1;
+    if (menu_movie && gui_menu)
+        g_menu_latch = 0;
+    if (game_player_active())
+        g_menu_latch = 0;  // герой появился в мире — это уже игра, меню закончилось
+    int menu = gui_menu || g_menu_override || menu_movie || g_menu_latch;
     g_touch_menu = gui_menu;      // только настоящее GUI-меню прячет экранные кнопки
     g_touch_menu_pass = menu;     // главное меню на ролике: касания мышью, но кнопки видны
     g_bink_menu = !gui_menu && menu;

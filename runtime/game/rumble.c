@@ -57,6 +57,7 @@ static u32 g_epoch, g_pc_cls, g_pc, g_frames;
 static uo_prop g_p_player, g_p_pawn, g_p_kwpawn;  // KWPawn — у KWHeroController (Shrek 2)
 static u32 g_kw_cls;                              // класс контроллера, для которого искался KWPawn
 static u32 g_pawn_cls, g_pawn;  // класс со смещениями ниже; пешка прошлого кадра
+static volatile int g_player_active;  // читается хостом в input_tick: главное меню или уже игра
 static uo_prop g_p_health, g_p_max;
 static int g_has_max;
 static float g_health;
@@ -243,6 +244,8 @@ static u32 find_local_pc(void)
     return 0;
 }
 
+int game_player_active(void) { return g_player_active != 0; }
+
 void game_rumble_frame(void)
 {
     if (g_log < 0) {
@@ -253,21 +256,26 @@ void game_rumble_frame(void)
         g_hit_test_at = t ? atof(t) : -1;
         g_start_ns = rt_ticks_ns();
     }
-    if (!hle_rumble_hook || !uo_init())
+    if (!hle_rumble_hook || !uo_init()) {
+        g_player_active = 0;
         return;
+    }
     g_frames++;
     u32 ep = __atomic_load_n(&rt_gc_epoch, __ATOMIC_RELAXED);
     if (ep != g_epoch) {  // смена карты: контроллер, пешка и классы могли смениться
         g_epoch = ep;
         g_pc = g_pawn = g_pawn_cls = g_kw_cls = 0;
+        g_player_active = 0;
         hits_reset();
     }
     if (g_pc && (g_frames % 120 == 0) && (!alive(g_pc) || !rd32(g_mem, g_pc + g_p_player.offset)))
         g_pc = g_pawn = 0;
     if (!g_pc && g_frames % 60 == 1)
         g_pc = find_local_pc();
-    if (!g_pc)
+    if (!g_pc) {
+        g_player_active = 0;
         return;
+    }
     // Controller.Pawn на время роликов пуст, а KWHeroController.KWPawn по-прежнему указывает на героя
     u32 pawn = rd32(g_mem, g_pc + g_p_pawn.offset);
     if (!pawn) {
@@ -287,8 +295,10 @@ void game_rumble_frame(void)
     }
     if (!alive(pawn)) {
         g_pawn = 0;
+        g_player_active = 0;
         return;
     }
+    g_player_active = 1;
     hits_frame(pawn);
     u32 cls = uo_class(pawn);
     if (cls != g_pawn_cls) {

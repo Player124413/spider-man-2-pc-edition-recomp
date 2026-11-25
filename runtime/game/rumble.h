@@ -23,6 +23,8 @@ int game_rumble_from_hits(int pawns, int props, game_rumble_pulse *out);
 
 // Раз в кадр в потоке гостя (d3d8_present): поиск PlayerController с Viewport, пешка, здоровье -> импульс.
 void game_rumble_frame(void);
+// Есть ли в мире живая пешка локального игрока: признак того, что началась игра (а не главное меню).
+int game_player_active(void);
 
 #ifdef __cplusplus
 }
