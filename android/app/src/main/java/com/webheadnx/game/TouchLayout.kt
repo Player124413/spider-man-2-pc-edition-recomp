@@ -32,13 +32,12 @@ class Control(
 object TouchLayout {
     private const val FILE = "touch_layout.json"
     // 2: стики по умолчанию статичные; 3/4: Minus («Пропуск») показывали и снова прятали;
-    // 5: убрали кнопку зелий; 6: A/B шлют клавиши мыши/Ctrl (не джойстик), Minus снова виден для пропуска роликов.
-    private const val VERSION = 6
+    // 5: убрали кнопку зелий; 6: A/B шлют клавиши мыши/Ctrl, Minus виден для пропуска роликов;
+    // 7: минимальный набор — только стик, удар, прыжок, паутина, пропуск, меню. Крестовина/ZL/правый стик скрыты.
+    private const val VERSION = 7
 
-    // По умолчанию — как на геймпаде Switch (docs/CONSOLE.md, «Раскладка»): A — удар, B — прыжок, Plus — меню,
-    // ZL — второй слой (с ним A/B — зелья). L/R (колесо мыши: смена навыка, скорость камеры), Y «Камера» (камера за
-    // спину; есть скрытая «Центр») и X «Действие» (Use — в игре не нужен) на экране не нужны и убраны; из старых
-    // раскладок «l», «r», «y», «x» просто не читаются
+    // Минимальный набор по экрану «Управление» в игре: ЛКМ — удар, Ctrl — прыжок, Enter — паутина/действие,
+    // Space — пропуск ролика. Левый стик — движение, палец по пустому месту — камера. Всё остальное скрыто.
     fun defaults(): List<Control> = listOf(
         Control("lstick", Kind.STICK, "", 0.14f, 0.70f, 0.38f),  // статичный: не ездит под пальцем
         // A/B как клавиши: в Spider-Man 2 Joy2 через раз не давал двойной прыжок, а Fire надёжнее левой кнопки мыши.
@@ -53,7 +52,7 @@ object TouchLayout {
         Control("minus", Kind.BUTTON, L.t("Пропуск", "Skip"), 0.42f, 0.07f, 0.12f, visible = true, vk = 0x20),
         Control("rs", Kind.BUTTON, L.t("Центр", "Center"), 0.93f, 0.33f, 0.11f, visible = false, button = SnxNative.RSTICK),
         Control("esc", Kind.BUTTON, "Esc", 0.50f, 0.07f, 0.10f, visible = false, vk = 0x1B),
-        Control("enter", Kind.BUTTON, L.t("Ввод", "Enter"), 0.36f, 0.07f, 0.10f, visible = false, vk = 0x0D),
+        Control("enter", Kind.BUTTON, L.t("Паутина", "Web"), 0.93f, 0.45f, 0.14f, visible = true, vk = 0x0D),
     ) + (1..9).map { n ->
         // зелья 1–9 — цифры клавиатуры (как в игре на ПК)
         Control("potion$n", Kind.BUTTON, "$n", 0.30f + 0.055f * (n - 1), 0.30f, 0.09f, visible = false, vk = 0x30 + n)
@@ -76,8 +75,9 @@ object TouchLayout {
                 c.size = o.optDouble("size", c.size.toDouble()).toFloat().coerceIn(MIN_SIZE, MAX_SIZE)
                 if (ver >= 4 || c.id != "minus") c.visible = o.optBoolean("visible", c.visible)
                 // обновляем раскладку без потери пользовательских позиций: зелья убраны, пропуск добавлен
-                if (c.id == "zl") c.visible = false
-                if (c.id == "minus") c.visible = true
+                // минимальный набор: лишние элементы из старых раскладок не показываем
+                if (c.id == "zl" || c.id == "dpad" || c.id == "rstick" || c.id.startsWith("potion")) c.visible = false
+                if (c.id == "minus" || c.id == "enter") c.visible = true
                 c.opacity = o.optDouble("opacity", c.opacity.toDouble()).toFloat().coerceIn(0.1f, 1f)
                 if (ver >= 2) c.floating = o.optBoolean("floating", c.floating)
                 c.toggle = o.optBoolean("toggle", c.toggle)
