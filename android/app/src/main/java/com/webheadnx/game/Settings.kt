@@ -35,8 +35,16 @@ class Settings(private val ctx: Context) {
         get() = p.getBoolean("tex16", Device.tier(ctx).tex16)
         set(v) { p.edit().putBoolean("tex16", v).commit() }
     var aspect: Int  // формат кадра: 0 — во весь экран (Hor+), 1 — не шире 16:9, 2 — 4:3 (интерфейс без растяжения)
-        get() = p.getInt("aspect", 0)
-        set(v) { p.edit().putInt("aspect", v).commit() }
+        get() {
+            // один раз переводим старые установки с «во весь экран» на 16:9: на телефоне 2.21:1 это даёт
+            // кадрирование как в исходной игре/видео, а не растянутые по ширине небо и здания
+            if (!p.contains("aspect_16x9_default")) {
+                val old = p.getInt("aspect", 1)
+                p.edit().putInt("aspect", if (old == 0) 1 else old).putBoolean("aspect_16x9_default", true).commit()
+            }
+            return p.getInt("aspect", 1)
+        }
+        set(v) { p.edit().putInt("aspect", v).putBoolean("aspect_16x9_default", true).commit() }
     var showFps: Boolean
         get() = p.getBoolean("showFps", false)
         set(v) { p.edit().putBoolean("showFps", v).commit() }
