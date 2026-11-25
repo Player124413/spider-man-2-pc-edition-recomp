@@ -35,6 +35,9 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
     var passThroughMenu = false
         set(v) { if (field != v) { field = v; releaseAll(); invalidate() } }
     var onGear: (() -> Unit)? = null
+    // Кнопка «Меню» (Plus) дополнительно переключает принудительный режим меню порта: в нём джойстик
+    // не двигает героя, а тапы по пустому месту выбирают пункты. Повторное нажатие возвращает управление.
+    private var menuOverride = false
     var onSelect: ((Control?) -> Unit)? = null  // редактор: выбранный элемент
     var onDrag: ((Boolean) -> Unit)? = null      // редактор: элемент тянут пальцем (true) / отпустили (false)
     var onEmptyTap: (() -> Unit)? = null         // редактор: касание пустого места (без сдвига пальца)
@@ -347,6 +350,11 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
             f.bind = Bind.CONTROL
             f.ctl = c
             if (c.kind == Kind.BUTTON && c.id != POTION_ID) markCombo()
+            if (c.id == "plus") {
+                menuOverride = !menuOverride
+                try { SnxNative.menuMode(menuOverride) } catch (e: UnsatisfiedLinkError) {}
+                invalidate()
+            }
             when (c.kind) {
                 Kind.STICK -> startStick(c, id, cx(c), cy(c), x, y)
                 Kind.DPAD -> { markCombo(); updateDpad(c, x, y) }
