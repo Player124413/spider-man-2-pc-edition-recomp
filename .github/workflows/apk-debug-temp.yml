@@ -10,12 +10,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          run-id: 45575457040
-          name: Webhead2-0.1.0-29.apk
-          path: apk
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download artifact via API
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh api repos/Player124413/spider-man-2-pc-edition-recomp/actions/artifacts/15003863143/zip > artifact.zip
+          ls -l artifact.zip
+          unzip -o artifact.zip -d apk
       - name: Push APK to temp branch
         run: |
           set -euo pipefail
