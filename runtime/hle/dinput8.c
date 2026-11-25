@@ -27,6 +27,7 @@ typedef struct {
 static pthread_mutex_t g_in_lock = PTHREAD_MUTEX_INITIALIZER;
 static s32 g_dx, g_dy, g_dz;
 static u8 g_btn[8];
+static u8 g_keys_di[256];  // состояние DI-клавиатуры по VK_*
 static u32 g_ev[MQ][2];  // ofs, data
 static int g_ev_head, g_ev_count;
 static u32 g_seq;
@@ -54,6 +55,16 @@ void dinput8_mouse_move(int dx, int dy, int dz)
         event(4, (u32)dy);
     if (dz)
         event(8, (u32)dz);
+    pthread_mutex_unlock(&g_in_lock);
+}
+
+void dinput8_key(int vk, int down)
+{
+    if (vk <= 0 || vk >= 256)
+        return;
+    pthread_mutex_lock(&g_in_lock);
+    g_keys_di[vk] = down ? 0x80 : 0;
+    event(0x80000000u | (u32)vk, (u32)(down ? 0x80 : 0));  // старший бит отличает клавиатуру от мыши
     pthread_mutex_unlock(&g_in_lock);
 }
 
@@ -189,6 +200,10 @@ static void dev_GetDeviceState(CPU *c)
         g_dx = g_dy = g_dz = 0;
         memcpy(g_mem + p + 12, g_btn, cb >= 20 ? 8 : 4);
         pthread_mutex_unlock(&g_in_lock);
+    } else if (d && d->kind == DEV_KEYBOARD && cb >= 256) {
+        pthread_mutex_lock(&g_in_lock);
+        memcpy(g_mem + p, g_keys_di, 256);
+        pthread_mutex_unlock(&g_in_lock);
     } else if (d && d->kind == DEV_JOY && cb >= 0x50) {
         // DIJOYSTATE(2): lX lY lZ lRx lRy lRz, rglSlider[2], rgdwPOV[4] (+0x20), rgbButtons[32|128] (+0x30)
         pthread_mutex_lock(&g_in_lock);
@@ -217,7 +232,7 @@ static void dev_GetDeviceData(CPU *c)
         wr32(g_mem, inout, 0);
         RET(5, DIERR_NOTACQUIRED);
     }
-    if (d->kind == DEV_MOUSE) {
+    if (d->kind == DEV_MOUSE || d->kind == DEV_KEYBOARD) {
         pthread_mutex_lock(&g_in_lock);
         u32 now = (u32)(rt_ticks_ns() / 1000000u);
         for (; n < want && (int)n < g_ev_count; n++) {
@@ -235,7 +250,8 @@ static void dev_GetDeviceData(CPU *c)
             g_ev_head = (g_ev_head + (int)n) % MQ;
             g_ev_count -= (int)n;
             g_seq += n;
-            g_dx = g_dy = g_dz = 0;  // буферизованные смещения уже отданы
+            if (d->kind == DEV_MOUSE)
+                g_dx = g_dy = g_dz = 0;  // буферизованные смещения уже отданы
         }
         pthread_mutex_unlock(&g_in_lock);
     }

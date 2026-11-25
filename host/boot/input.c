@@ -122,10 +122,10 @@ static u32 mouse_lparam(int wx, int wy)
 static void key(u32 vk, int down)
 {
     u32 hwnd = user32_focus();
-    if (!hwnd)
-        return;
     user32_set_key(vk, down);
-    user32_post(hwnd, down ? WM_KEYDOWN : WM_KEYUP, vk, 1u | (down ? 0 : 3u << 30));
+    dinput8_key((int)vk, down);  // UE2 читает клавиши и через DirectInput — даже если окно без фокуса
+    if (hwnd)
+        user32_post(hwnd, down ? WM_KEYDOWN : WM_KEYUP, vk, 1u | (down ? 0 : 3u << 30));
 }
 
 // кнопка мыши: 0 левая, 1 правая, 2 средняя
