@@ -627,6 +627,11 @@ static void click_at(float x, float y)
     if (g_bink_menu) {
         // Bink-меню игры не поднимает GUIController: ждать game_menu_point_done() бессмысленно —
         // GUI не пришлёт кадр, и клик никогда не будет послан. Нажимаем сразу в точке касания.
+        // Перед нажатием двигаем курсор сообщением окну: меню выбирает пункт по WM_MOUSEMOVE,
+        // а не только по GetCursorPos (иначе клик приходит по старому element under cursor).
+        u32 hwnd = user32_focus();
+        if (hwnd)
+            user32_post(hwnd, WM_MOUSEMOVE, g_buttons, cursor_lparam());
         mouse_button(0, 1, cursor_lparam());
         g_click_state = 2;
     } else {
@@ -685,6 +690,7 @@ static void back(int down)
 static u32 g_nav_key;            // нажатая крестовиной стрелка
 static int g_nav_dir = -1;       // зажатое направление (повтор, как у клавиатуры)
 static u32 g_nav_next;           // время следующего повтора, мс
+static u32 g_nav_release, g_select_release;  // отложенный отпуск клавиш для Bink-меню
 
 static void nav(int dir, int down)
 {
@@ -694,6 +700,7 @@ static void nav(int dir, int down)
         if (g_nav_key)
             key(g_nav_key, 0);
         g_nav_key = 0;
+        g_nav_release = 0;
         if (dir == g_nav_dir)
             g_nav_dir = -1;
         return;
@@ -703,8 +710,13 @@ static void nav(int dir, int down)
         g_nav_next = SDL_GetTicks() + 400;
     }
     game_menu_open(&kind);
-    if (dir >= 2 && (kind == GM_SLIDER || kind == GM_COMBO)) {
+    if (g_bink_menu || (dir >= 2 && (kind == GM_SLIDER || kind == GM_COMBO))) {
+        // Bink-главное меню не знает про game_menu_nav(): водим его обычными стрелками клавиатуры.
+        // Клавишу держим ~90 мс, иначе игра может не увидеть WM_KEYDOWN между кадрами.
+        if (g_nav_key)
+            key(g_nav_key, 0);
         key(g_nav_key = arrows[dir], 1);
+        g_nav_release = SDL_GetTicks() + 90;
         return;
     }
     game_menu_nav(dir);
@@ -717,6 +729,17 @@ static void select_(int down)
     int kind = GM_NONE;
     static int pressed;
     game_menu_open(&kind);
+    if (g_bink_menu) {
+        // Bink-меню не реагирует на синтетический WM_LBUTTONDOWN: выбираем пункт клавишей Enter.
+        if (down) {
+            key(0x0D, 1);
+            g_select_release = SDL_GetTicks() + 90;
+        } else {
+            key(0x0D, 0);
+            g_select_release = 0;
+        }
+        return;
+    }
     if (down && kind == GM_SLIDER)
         return;
     if (down && kind == GM_EDIT)
@@ -1453,6 +1476,17 @@ void input_tick(void)
     if (dt > 0.1f)
         dt = 0.1f;
     click_tick();
+    // отпускание клавиш, которые Bink-меню держит коротким нажатием (стрелки/Enter)
+    u32 now_key = SDL_GetTicks();
+    if (g_nav_release && (s32)(now_key - g_nav_release) >= 0) {
+        key(g_nav_key, 0);
+        g_nav_key = 0;
+        g_nav_release = 0;
+    }
+    if (g_select_release && (s32)(now_key - g_select_release) >= 0) {
+        key(0x0D, 0);
+        g_select_release = 0;
+    }
     // главное меню Spider-Man 2 — Bink-заставка без GUIController: без этого признака касания
     // перехватываются экранным геймпадом и пункты «Начать новую игру» не нажимаются
     int gui_menu = game_menu_open(NULL);
