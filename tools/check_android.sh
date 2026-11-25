@@ -19,6 +19,7 @@ check "зависимости" "test -x '$ROOT/tools/android_deps.sh' && grep -q
 check "Workflow" "test -f '$ROOT/.github/workflows/android.yml' && grep -q 'SNX_ANDROID_VIDEO' '$ROOT/.github/workflows/android.yml'"
 check "отдельный ID приложения" "grep -q \"applicationId 'com.webheadnx.game'\" '$ROOT/android/app/build.gradle' && ! grep -q \"applicationId 'com.shreknx.game'\" '$ROOT/android/app/build.gradle'"
 check "отдельный ключ подписи" "test -f '$ROOT/android/webhead2-release.p12.b64' && grep -q 'webhead2-release.p12.b64' '$ROOT/android/app/build.gradle' && grep -q 'keyAlias.*webhead2' '$ROOT/android/app/build.gradle'"
+check "подпись v1+v2+v3" "grep -q 'enableV1Signing true' '$ROOT/android/app/build.gradle' && grep -q 'enableV2Signing true' '$ROOT/android/app/build.gradle' && grep -q 'enableV3Signing true' '$ROOT/android/app/build.gradle' && grep -q 'Verified using v3 scheme' '$ROOT/.github/workflows/android.yml'"
 check "Spider-Man иконка" "grep -q 'FF2451A8' '$ROOT/android/app/src/main/res/drawable/ic_launcher_foreground.xml' && grep -q 'FFE62429' '$ROOT/android/app/src/main/res/values/colors.xml'"
 check "имя exe в лаунчере" "grep -q '\"Webhead.exe\"' '$ROOT/android/app/src/main/java/com/webheadnx/game/GameFolder.kt'"
 check "нет game.exe в исходниках порта" "! grep -rq 'game.exe' '$ROOT/android/app/src/main/java' '$ROOT/tools/fetch_game.sh'"
