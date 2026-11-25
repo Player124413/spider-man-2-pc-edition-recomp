@@ -1332,7 +1332,18 @@ int touch_state(void)
     return (g_touch_menu ? 1 : 0) | (g_touch_ready ? 2 : 0) | (g_touch_menu_pass ? 4 : 0);
 }
 
-void touch_menu_override(int on) { g_menu_override = on != 0; }
+void touch_menu_override(int on)
+{
+    g_menu_override = on != 0;
+    if (!on) {
+        // Кнопка «Меню» — явный выход из режима меню. Без этого защёлка, поставленная главным роликом,
+        // остаётся включённой и после перехода в игру, если игра не сообщила о живой пешке.
+        g_menu_latch = 0;
+        g_menu_clicked = 0;
+        g_mouse_click_release = 0;
+    }
+    fprintf(stderr, "[touch] menu override=%d latch=%d\n", g_menu_override, g_menu_latch);
+}
 
 void touch_mouse(float u, float v, int down)
 {
@@ -1597,9 +1608,9 @@ void input_tick(void)
         g_menu_latch = 1;
     if (menu_movie && gui_menu)
         g_menu_latch = 0;
-    // Надёжный признак игры: живая пешка. Draw-вызовы учитываются только после клика по меню:
-    // в главном меню их тоже бывает больше 12, и старая проверка размораживала стик прямо в меню.
-    if (game_player_active() || (g_menu_clicked && d3d8_frame_draws() > 12))
+    // Защёлка держится до живой пешки или до явного выхода кнопкой «Меню». Любой клик по пункту
+    // (Options/Credits внутри меню) не должен её снимать: иначе после возврата мышь «зависает».
+    if (game_player_active())
         g_menu_latch = 0;
     int menu = gui_menu || g_menu_override || menu_movie || g_menu_latch;
     g_touch_menu = gui_menu;      // только настоящее GUI-меню прячет экранные кнопки
