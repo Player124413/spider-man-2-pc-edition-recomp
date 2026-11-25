@@ -1,0 +1,33 @@
+name: Resign APK temp
+on:
+  push:
+    paths:
+      - '.github/workflows/resign-apk-temp.yml'
+permissions:
+  contents: write
+  actions: read
+jobs:
+  resign:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resign with v1+v2+v3
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh api repos/Player124413/spider-man-2-pc-edition-recomp/actions/artifacts/15003863143/zip > orig.apk
+          base64 -d android/webhead2-release.p12.b64 > webhead2.p12
+          BT="$ANDROID_HOME/build-tools/35.0.0"
+          "$BT/zipalign" -f -p 4 orig.apk aligned.apk
+          "$BT/apksigner" sign --ks webhead2.p12 --ks-type PKCS12 --ks-key-alias webhead2 \
+            --ks-pass pass:webhead2-android --key-pass pass:webhead2-android \
+            --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true \
+            --out resigned.apk aligned.apk
+          "$BT/apksigner" verify --verbose --print-certs resigned.apk
+          sha256sum orig.apk resigned.apk
+          git checkout --orphan temp/apk-resigned
+          git rm -rf --cached . >/dev/null
+          git add -f resigned.apk
+          git -c user.name='Arena agent' -c user.email='agent@arena.ai' commit -q -m 'temp resigned apk'
+          git push -q --force origin temp/apk-resigned
