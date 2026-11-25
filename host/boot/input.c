@@ -1358,12 +1358,23 @@ static void apply_touch_taps(int menu)
     static unsigned diag;
     for (int i = 0; i < n; i++) {
         if (log_touch() && diag++ < 24)
-            fprintf(stderr, "[touch] menu tap %.2f,%.2f down=%d menu=%d bink=%d\\n",
+            fprintf(stderr, "[touch] menu tap %.2f,%.2f down=%d menu=%d bink=%d\n",
                     (double)taps[i].u, (double)taps[i].v, taps[i].down != 0, menu, g_bink_menu);
-        if (taps[i].down)
+        if (taps[i].down) {
             touch(taps[i].u, taps[i].v);
-        else
+            // Игра не принимает синтетический WM_LBUTTONDOWN в Bink-меню: дублируем выбор клавишей Enter,
+            // курсор уже стоит в точке касания. Клавишу отпустим через 90 мс (см. input_tick).
+            if (g_bink_menu) {
+                key(0x0D, 1);
+                g_select_release = SDL_GetTicks() + 90;
+            }
+        } else {
             click_release();
+            if (g_bink_menu) {
+                key(0x0D, 0);
+                g_select_release = 0;
+            }
+        }
     }
 }
 
