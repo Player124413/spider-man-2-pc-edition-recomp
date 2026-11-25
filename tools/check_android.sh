@@ -12,6 +12,7 @@ check "JNI-мост" "test -f '$ROOT/host/boot/android.c' && grep -q 'Java_com_w
 check "режим выбора пунктов меню" "grep -q 'touch_menu_override' '$ROOT/host/boot/input.c' && grep -q 'JNI_FN(menuMode)' '$ROOT/host/boot/android.c' && grep -q 'fun menuMode' '$ROOT/android/app/src/main/java/com/webheadnx/game/SnxNative.kt' && grep -q 'onMenuMode' '$ROOT/android/app/src/main/java/com/webheadnx/game/TouchControlsView.kt'"
 check "BinkWait в HLE" "grep -q 'hle_binkw32__BinkWait_4' '$ROOT/runtime/hle/bink.c' && ! grep -q 'BinkWait' '$ROOT/platform/headless/stubs.c'"
 check "меню только на заставке" "grep -q 'bink_menu_movie_active' '$ROOT/runtime/hle/bink.c' && grep -q 'bink_menu_movie_active()' '$ROOT/host/boot/input.c' && grep -q 'Marvel.bik' '$ROOT/runtime/hle/bink.c'"
+check "кнопки в главном меню" "grep -q 'STATE_MENU_PASS' '$ROOT/android/app/src/main/java/com/webheadnx/game/SnxNative.kt' && grep -q 'passThroughMenu' '$ROOT/android/app/src/main/java/com/webheadnx/game/TouchControlsView.kt' && grep -q 'controlsVisible' '$ROOT/android/app/src/main/java/com/webheadnx/game/TouchControlsView.kt'"
 check "CMake Android" "test -f '$ROOT/cmake/android.cmake' && grep -q 'SNX_ANDROID_DEPS' '$ROOT/cmake/android.cmake'"
 check "зависимости" "test -x '$ROOT/tools/android_deps.sh' && grep -q 'ffmpeg-src' '$ROOT/tools/android_deps.sh'"
 check "Workflow" "test -f '$ROOT/.github/workflows/android.yml' && grep -q 'SNX_ANDROID_VIDEO' '$ROOT/.github/workflows/android.yml'"

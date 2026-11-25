@@ -23,6 +23,7 @@ object SnxNative {
 
     const val STATE_MENU = 1
     const val STATE_READY = 2
+    const val STATE_MENU_PASS = 4  // главное меню на Bink-заставке: касания идут в SDL, кнопки остаются
 
     @JvmStatic external fun pad(buttons: Int, lx: Float, ly: Float, rx: Float, ry: Float)
     @JvmStatic external fun look(dx: Float, dy: Float)

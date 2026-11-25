@@ -31,6 +31,8 @@ class GameActivity : SDLActivity(), InputManager.InputDeviceListener, DisplayMan
             val t = touch ?: return
             val st = try { SnxNative.state() } catch (e: UnsatisfiedLinkError) { 0 }
             t.hiddenByMenu = st and SnxNative.STATE_MENU != 0
+            // в главном меню на рольке кнопки должны оставаться: именно A/крестовина выбирают пункты
+            t.passThroughMenu = st and SnxNative.STATE_MENU_PASS != 0
             t.postDelayed(this, 100)
         }
     }

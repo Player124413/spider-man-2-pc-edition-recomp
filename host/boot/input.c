@@ -1238,7 +1238,7 @@ static struct {
     char down;
 } g_touch_keys[32];
 static int g_ntouch_keys;
-static volatile int g_touch_menu, g_touch_ready;
+static volatile int g_touch_menu, g_touch_ready, g_touch_menu_pass;
 // главное меню Spider-Man 2 рисуется поверх Bink-ролика и не поднимает GUIController ActivePage, поэтому
 // game_menu_open() в нём ложно; лаунчер включает этот флаг кнопкой «Mеню», пока игрок в главном меню.
 static volatile int g_menu_override;
@@ -1273,7 +1273,12 @@ void touch_key(int vk, int down)
     pthread_mutex_unlock(&g_touch_lock);
 }
 
-int touch_state(void) { return (g_touch_menu ? 1 : 0) | (g_touch_ready ? 2 : 0); }
+// бит 0 — GUI-меню игры (настоящее GUI, скрываем экранные кнопки), бит 1 — первый кадр,
+// бит 2 — главное меню на Bink-заставке (касания проходят к SDL, но кнопки остаются на экране)
+int touch_state(void)
+{
+    return (g_touch_menu ? 1 : 0) | (g_touch_ready ? 2 : 0) | (g_touch_menu_pass ? 4 : 0);
+}
 
 void touch_menu_override(int on) { g_menu_override = on != 0; }
 
@@ -1392,8 +1397,10 @@ void input_tick(void)
     click_tick();
     // главное меню Spider-Man 2 — Bink-заставка без GUIController: без этого признака касания
     // перехватываются экранным геймпадом и пункты «Начать новую игру» не нажимаются
-    int menu = game_menu_open(NULL) || g_menu_override || bink_menu_movie_active();
-    g_touch_menu = menu;
+    int gui_menu = game_menu_open(NULL);
+    int menu = gui_menu || g_menu_override || bink_menu_movie_active();
+    g_touch_menu = gui_menu;      // только настоящее GUI-меню прячет экранные кнопки
+    g_touch_menu_pass = menu;     // главное меню на ролике: касания мышью, но кнопки видны
     if (menu != g_menu) {
         release_all();
         g_menu = menu;

@@ -19,7 +19,8 @@ import kotlin.math.min
 // Экранное управление поверх игры (и редактор раскладки). Один полноэкранный View разбирает все пальцы сам:
 // элементы (кнопки, стики, крестовина) -> виртуальный геймпад (SnxNative.pad), палец на свободном месте — камера
 // (SnxNative.look). Кнопки «скользят»: палец, переехавший с кнопки на соседнюю, отпускает первую и жмёт вторую.
-// В меню игры (SnxNative.state) элементы прячутся, а касания проходят к SDL под этим View — там их разбирает меню.
+// В GUI-меню игры элементы прячутся. В главном меню на Bink-заставке касания пустого места идут в SDL,
+// но кнопки остаются видимыми: именно A/крестовина выбирают «Начать новую игру», «Загрузить игру», «Настройки».
 // Рисуется только при изменениях (без постоянной перерисовки — не тратит GPU и батарею).
 class TouchControlsView(ctx: Context, private val settings: Settings, val editMode: Boolean) : View(ctx) {
     var controls: MutableList<Control> = TouchLayout.load(ctx)
@@ -29,6 +30,9 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
     var hiddenByMenu = false
         set(v) { if (field != v) { field = v; releaseAll(); invalidate() } }
     var hiddenByGamepad = false
+        set(v) { if (field != v) { field = v; releaseAll(); invalidate() } }
+    // главное меню на ролике: тапы по пустому месту идут в SDL, но экранные кнопки не прячем
+    var passThroughMenu = false
         set(v) { if (field != v) { field = v; releaseAll(); invalidate() } }
     var onGear: (() -> Unit)? = null
     var onMenuMode: ((Boolean) -> Unit)? = null
@@ -93,13 +97,15 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
     private fun menuRadius() = gearRadius()
 
     private fun active(): Boolean = editMode ||
-        (!menuMode && !hiddenByMenu && !hiddenByGamepad && settings.touchEnabled)
+        (!menuMode && !passThroughMenu && !hiddenByMenu && !hiddenByGamepad && settings.touchEnabled)
+    private fun controlsVisible(): Boolean = editMode ||
+        (!hiddenByMenu && !hiddenByGamepad && settings.touchEnabled)
 
     // ---------------------------------------------------------------- рисование
     override fun onDraw(canvas: Canvas) {
         if (editMode) drawGrid(canvas)
         val base = settings.opacity
-        if (active()) {
+        if (controlsVisible()) {
             for (c in controls) {
                 if (!c.visible && !editMode) continue
                 val a = if (c.visible) base * c.opacity else 0.25f
@@ -310,9 +316,12 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
         val idx = e.actionIndex
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                // меню или скрытое управление: касание — не наше (его получит SDL), кроме шестерёнки
                 val x = e.getX(idx); val y = e.getY(idx)
-                if (!onGearAt(x, y) && !onMenuAt(x, y) && !active()) return false
+                if (!onGearAt(x, y) && !onMenuAt(x, y)) {
+                    if (passThroughMenu && hit(x, y, ALL_KINDS) == null && slotArrowAt(x, y) == 0 &&
+                        floatingStickAt(x) == null) return false  // пустое место — тап по пункту меню в SDL
+                    if (!active()) return false
+                }
                 down(e.getPointerId(idx), x, y)
             }
             MotionEvent.ACTION_POINTER_DOWN -> down(e.getPointerId(idx), e.getX(idx), e.getY(idx))
@@ -355,6 +364,8 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
         fingers[id] = f
         if (onGearAt(x, y)) { f.bind = Bind.GEAR; return }
         if (onMenuAt(x, y)) { f.bind = Bind.MENU; return }
+        if (passThroughMenu && hit(x, y, ALL_KINDS) == null && slotArrowAt(x, y) == 0 &&
+            floatingStickAt(x) == null) return  // палец ушёл с кнопки на фон — дальше тап обработает SDL
         if (!active()) return
         val dir = slotArrowAt(x, y)
         if (dir != 0) {
