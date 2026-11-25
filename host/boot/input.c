@@ -19,6 +19,7 @@
 #include "host/boot/config.h"
 #include "host/boot/input.h"
 #include "host/boot/touch.h"
+#include "runtime/hle/bink.h"
 #include "runtime/hle/d3d8.h"
 #include "runtime/hle/dinput8.h"
 #include "runtime/hle/overlay.h"
@@ -1389,7 +1390,9 @@ void input_tick(void)
     if (dt > 0.1f)
         dt = 0.1f;
     click_tick();
-    int menu = game_menu_open(NULL) || g_menu_override;
+    // главное меню Spider-Man 2 — Bink-заставка без GUIController: без этого признака касания
+    // перехватываются экранным геймпадом и пункты «Начать новую игру» не нажимаются
+    int menu = game_menu_open(NULL) || g_menu_override || bink_movie_active();
     g_touch_menu = menu;
     if (menu != g_menu) {
         release_all();

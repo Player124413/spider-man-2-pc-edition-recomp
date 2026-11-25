@@ -30,3 +30,6 @@ void bink_video_copy(bink_video *v, u8 *dst, u32 pitch, u32 rows, u32 x, u32 y, 
 // Ролик Movies/*.bik, который игра сейчас крутит: его текущий кадр RGBA w x h (строки сверху вниз) — 1. Для
 // d3d8_present, когда кадр ролика не попал в задний буфер (ролик больше кадра игры).
 int bink_movie_overlay(const u8 **rgba, u32 *w, u32 *h);
+// Есть ли активный файловый ролик (Movies/*.bik) — главное меню Spider-Man 2 работает поверх такого ролика,
+// и движок не поднимает GUIController ActivePage. Хост использует это как запасной признак меню.
+int bink_movie_active(void);
