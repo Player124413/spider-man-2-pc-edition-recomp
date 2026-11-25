@@ -10,23 +10,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Download artifact via API
+      - name: Download artifact
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          mkdir -p diag
-          set +e
-          gh api repos/Player124413/spider-man-2-pc-edition-recomp/actions/artifacts/15003863143/zip -o diag/artifact.zip > diag/out.txt 2> diag/err.txt
-          echo "rc=$?" >> diag/out.txt
-          set -e
-          ls -l diag >> diag/out.txt 2>&1 || true
-          head -c 2000 diag/err.txt >> diag/out.txt 2>&1 || true
-          cd diag
-          git init -q
-          git config user.name 'Arena agent'
-          git config user.email 'agent@arena.ai'
-          if [ -f artifact.zip ]; then split -b 40m artifact.zip chunk-; rm -f artifact.zip; fi
-          ls -lh >> out.txt 2>&1 || true
-          git add out.txt chunk-* 2>/dev/null || true
-          git commit -q -m 'temp apk diag chunks'
-          git push -q --force origin HEAD:refs/heads/temp/apk-debug
+          set -euo pipefail
+          gh api repos/Player124413/spider-man-2-pc-edition-recomp/actions/artifacts/15003863143/zip > artifact.zip
+          ls -l artifact.zip
+          unzip -o artifact.zip -d apk
+          ls -l apk
+          git checkout --orphan temp/apk-debug
+          git rm -rf --cached . >/dev/null
+          git add -f apk
+          git -c user.name='Arena agent' -c user.email='agent@arena.ai' commit -q -m 'temp apk'
+          git push -q --force origin temp/apk-debug
