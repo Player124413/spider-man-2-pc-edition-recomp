@@ -1238,6 +1238,7 @@ static void scripted_keys(void)
 }
 
 // ---------------------------------------------------------------- сенсорный экран (host/boot/touch.h)
+static int log_touch(void);  // ниже: в Android — всегда, на ПК — по SNX_LOG_TOUCH
 // Пишут потоки лаунчера (JNI), читает input_tick: состояние под замком, применение — только в главном потоке.
 static pthread_mutex_t g_touch_lock = PTHREAD_MUTEX_INITIALIZER;
 static u32 g_touch_buttons, g_touch_applied;
@@ -1327,7 +1328,11 @@ static void apply_touch_taps(int menu)
     pthread_mutex_unlock(&g_touch_lock);
     if (!menu)
         return;
+    static unsigned diag;
     for (int i = 0; i < n; i++) {
+        if (log_touch() && diag++ < 24)
+            fprintf(stderr, "[touch] menu tap %.2f,%.2f down=%d menu=%d bink=%d\\n",
+                    (double)taps[i].u, (double)taps[i].v, taps[i].down != 0, menu, g_bink_menu);
         if (taps[i].down)
             touch(taps[i].u, taps[i].v);
         else
