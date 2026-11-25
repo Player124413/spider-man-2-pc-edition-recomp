@@ -1290,6 +1290,9 @@ static volatile int g_menu_latch;
 // главное меню Spider-Man 2 рисуется поверх Bink-ролика и не поднимает GUIController ActivePage, поэтому
 // game_menu_open() в нём ложно; лаунчер включает этот флаг кнопкой «Mеню», пока игрок в главном меню.
 static volatile int g_menu_override;
+// Клик по пункту меню: защёлка меню снимается только после реального выбора, а не просто потому,
+// что в кадре стало много draw-вызовов (иначе стик начинал двигать героя прямо в главном меню).
+static volatile int g_menu_clicked;
 
 void touch_pad(uint32_t buttons, float lx, float ly, float rx, float ry)
 {
@@ -1365,8 +1368,19 @@ static void apply_touch_mouse(void)
     if (win)
         SDL_GetWindowSize(win, &ww, &wh);
     static int last_x = -1, last_y = -1;
+    static unsigned diag_mouse;
     for (int i = 0; i < n; i++) {
-        int x = (int)(evs[i].u * (float)ww), y = (int)(evs[i].v * (float)wh);
+        float u = evs[i].u, v = evs[i].v;
+        if (u < 0.f) u = 0.f;
+        if (u > 1.f) u = 1.f;
+        if (v < 0.f) v = 0.f;
+        if (v > 1.f) v = 1.f;
+        int x = (int)(u * (float)ww), y = (int)(v * (float)wh);
+        if (evs[i].down > 0)
+            g_menu_clicked = 1;
+        if (log_touch() && diag_mouse++ < 24)
+            fprintf(stderr, "[touch] virtual mouse %.2f,%.2f -> %d,%d down=%d\n", (double)u, (double)v, x, y,
+                    (int)evs[i].down);
         SDL_Event e = {0};
         e.type = SDL_MOUSEMOTION;
         e.motion.x = x; e.motion.y = y;
@@ -1421,6 +1435,7 @@ static void apply_touch_taps(int menu)
             fprintf(stderr, "[touch] menu tap %.2f,%.2f down=%d menu=%d bink=%d\n",
                     (double)taps[i].u, (double)taps[i].v, taps[i].down != 0, menu, g_bink_menu);
         if (taps[i].down) {
+            g_menu_clicked = 1;
             touch(taps[i].u, taps[i].v);
             // Игра не принимает синтетический WM_LBUTTONDOWN в Bink-меню: дублируем выбор клавишей Enter,
             // курсор уже стоит в точке касания. Клавишу отпустим через 90 мс (см. input_tick).
@@ -1570,9 +1585,9 @@ void input_tick(void)
         g_menu_latch = 1;
     if (menu_movie && gui_menu)
         g_menu_latch = 0;
-    // Надёжный признак игры: живая пешка ИЛИ десятки draw-вызовов. В главном меню Bink рисует 1–3 draw,
-    // поэтому защёлка-menu снимается как только начинается сцена — даже если UObject-пешка не находится.
-    if (game_player_active() || d3d8_frame_draws() > 12)
+    // Надёжный признак игры: живая пешка. Draw-вызовы учитываются только после клика по меню:
+    // в главном меню их тоже бывает больше 12, и старая проверка размораживала стик прямо в меню.
+    if (game_player_active() || (g_menu_clicked && d3d8_frame_draws() > 12))
         g_menu_latch = 0;
     int menu = gui_menu || g_menu_override || menu_movie || g_menu_latch;
     g_touch_menu = gui_menu;      // только настоящее GUI-меню прячет экранные кнопки
@@ -1582,8 +1597,10 @@ void input_tick(void)
         release_all();
         g_menu = menu;
         g_nav_dir = -1;
-        if (!menu)
+        if (!menu) {
             g_joy_frozen = 0;
+            g_menu_clicked = 0;
+        }
     }
     apply_touch_taps(menu);       // тапы из overlay-View идут в click_at сразу, без SDL_FINGERDOWN
     apply_touch_mouse();          // виртуальная мышь — через SDL_MOUSE*, как обычная мышь ПК

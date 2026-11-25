@@ -34,7 +34,8 @@ object TouchLayout {
     // 2: стики по умолчанию статичные; 3/4: Minus («Пропуск») показывали и снова прятали;
     // 5: убрали кнопку зелий; 6: A/B шлют клавиши мыши/Ctrl, Minus виден для пропуска роликов;
     // 7: минимальный набор — только стик, удар, прыжок, паутина, пропуск, меню. Крестовина/ZL/правый стик скрыты.
-    private const val VERSION = 7
+    // 8: кнопка Mouse убрана — виртуальная мышь работает по умолчанию (тап по пустому месту в меню).
+    private const val VERSION = 8
 
     // Минимальный набор по экрану «Управление» в игре: ЛКМ — удар, Ctrl — прыжок, Enter — паутина/действие,
     // Space — пропуск ролика. Левый стик — движение, палец по пустому месту — камера. Всё остальное скрыто.
@@ -53,8 +54,6 @@ object TouchLayout {
         Control("rs", Kind.BUTTON, L.t("Центр", "Center"), 0.93f, 0.33f, 0.11f, visible = false, button = SnxNative.RSTICK),
         Control("esc", Kind.BUTTON, "Esc", 0.50f, 0.07f, 0.10f, visible = false, vk = 0x1B),
         Control("enter", Kind.BUTTON, L.t("Паутина", "Web"), 0.93f, 0.45f, 0.14f, visible = true, vk = 0x0D),
-        // виртуальная мышь: тап/перетаскивание посылает SDL_MOUSE*, меню видит её как обычную мышь ПК
-        Control("mouse", Kind.BUTTON, "Mouse", 0.50f, 0.90f, 0.12f, visible = true),
     ) + (1..9).map { n ->
         // зелья 1–9 — цифры клавиатуры (как в игре на ПК)
         Control("potion$n", Kind.BUTTON, "$n", 0.30f + 0.055f * (n - 1), 0.30f, 0.09f, visible = false, vk = 0x30 + n)
@@ -80,6 +79,7 @@ object TouchLayout {
                 // минимальный набор: лишние элементы из старых раскладок не показываем
                 if (c.id == "zl" || c.id == "dpad" || c.id == "rstick" || c.id.startsWith("potion")) c.visible = false
                 if (c.id == "minus" || c.id == "enter") c.visible = true
+                if (c.id == "mouse") c.visible = false  // отдельная кнопка мыши убрана: она теперь в каждом тапе меню
                 c.opacity = o.optDouble("opacity", c.opacity.toDouble()).toFloat().coerceIn(0.1f, 1f)
                 if (ver >= 2) c.floating = o.optBoolean("floating", c.floating)
                 c.toggle = o.optBoolean("toggle", c.toggle)

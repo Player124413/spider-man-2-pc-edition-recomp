@@ -68,7 +68,7 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
     private val rect = RectF()
 
     // ---------------------------------------------------------------- состояние пальцев (игра)
-    private enum class Bind { NONE, CONTROL, LOOK, GEAR, SLOT, MENU_TAP, MOUSE }
+    private enum class Bind { NONE, CONTROL, LOOK, GEAR, SLOT, MENU_TAP }
     // combo — пока палец держал «Зелья», жали другую кнопку (ZL+A и т. п.): тогда при отпускании слот не пьётся
     private class Finger(var bind: Bind = Bind.NONE, var ctl: Control? = null, var lastX: Float = 0f, var lastY: Float = 0f,
                          var combo: Boolean = false)
@@ -92,14 +92,16 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
     private fun gearX() = 30f * density
     private fun gearY() = 30f * density
 
-    // passThroughMenu не отключает кнопки: они остаются видимыми и нажимаемыми, а тапы по пустому
-    // месту идут в меню через SnxNative.menuTap (SDL-поверхность под этим View их не получит).
+    // В любом меню (Bink-заставка, GUI, принудительный режим «Меню») тап по пустому месту — это
+    // виртуальная мышь: SDL_MOUSEMOTION + ЛКМ через SnxNative.mouse. Отдельной кнопки мыши больше нет,
+    // она работает по умолчанию; в игре те же пальцы по пустому месту по-прежнему крутят камеру.
     private fun active(): Boolean = editMode ||
         (!hiddenByMenu && !hiddenByGamepad && settings.touchEnabled)
     private fun controlsVisible(): Boolean = editMode ||
         (!hiddenByMenu && !hiddenByGamepad && settings.touchEnabled)
-    private fun menuTapAt(x: Float, y: Float): Boolean = passThroughMenu &&
-        hit(x, y, ALL_KINDS) == null && slotArrowAt(x, y) == 0 && floatingStickAt(x) == null
+    private fun menuTapAt(x: Float, y: Float): Boolean = (passThroughMenu || hiddenByMenu || menuOverride) &&
+        hit(x, y, ALL_KINDS) == null && slotArrowAt(x, y) == 0 && floatingStickAt(x) == null &&
+        !onGearAt(x, y)
 
     // ---------------------------------------------------------------- рисование
     override fun onDraw(canvas: Canvas) {
@@ -331,7 +333,8 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
         if (onGearAt(x, y)) { f.bind = Bind.GEAR; return }
         if (menuTapAt(x, y)) {
             f.bind = Bind.MENU_TAP
-            SnxNative.menuTap(x / max(1f, w()), y / max(1f, h()), true)
+            // Настоящие SDL-события мыши: курсор встаёт под палец, ЛКМ нажата до отпускания пальца.
+            SnxNative.mouse(x / max(1f, w()), y / max(1f, h()), 1)
             return
         }
         if (!active()) return
@@ -347,12 +350,6 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
         }
         val c = hit(x, y, ALL_KINDS)
         if (c != null) {
-            if (c.id == "mouse") {
-                f.bind = Bind.MOUSE
-                SnxNative.mouse(x / max(1f, w()), y / max(1f, h()), 1)
-                invalidate()
-                return
-            }
             f.bind = Bind.CONTROL
             f.ctl = c
             if (c.kind == Kind.BUTTON && c.id != POTION_ID) markCombo()
@@ -383,7 +380,7 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
     private fun move(id: Int, x: Float, y: Float) {
         val f = fingers[id] ?: return
         when (f.bind) {
-            Bind.MOUSE -> SnxNative.mouse(x / max(1f, w()), y / max(1f, h()), -1)
+            Bind.MENU_TAP -> SnxNative.mouse(x / max(1f, w()), y / max(1f, h()), -1)
             Bind.LOOK -> {
                 val k = settings.lookSensitivity * 1000f / max(1f, h())
                 SnxNative.look((x - f.lastX) * k, (y - f.lastY) * k)
@@ -414,10 +411,6 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
     private fun up(id: Int, x: Float, y: Float) {
         val f = fingers.remove(id) ?: return
         if (f.bind == Bind.MENU_TAP) {
-            SnxNative.menuTap(x / max(1f, w()), y / max(1f, h()), false)
-            return
-        }
-        if (f.bind == Bind.MOUSE) {
             SnxNative.mouse(x / max(1f, w()), y / max(1f, h()), 0)
             return
         }
@@ -500,10 +493,8 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
     }
 
     fun releaseAll() {
-        for (f in fingers.values) {
-            if (f.bind == Bind.MENU_TAP) SnxNative.menuTap(f.lastX / max(1f, w()), f.lastY / max(1f, h()), false)
-            if (f.bind == Bind.MOUSE) SnxNative.mouse(f.lastX / max(1f, w()), f.lastY / max(1f, h()), 0)
-        }
+        for (f in fingers.values)
+            if (f.bind == Bind.MENU_TAP) SnxNative.mouse(f.lastX / max(1f, w()), f.lastY / max(1f, h()), 0)
         fingers.clear()
         sticks.values.forEach { it.pointer = -1; it.vx = 0f; it.vy = 0f }
         dpadMask = 0
