@@ -541,7 +541,12 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
         var buttons = dpadMask
         val vks = HashSet<Int>()
         fun press(c: Control) {
-            if (c.button >= 0) buttons = buttons or (1 shl c.button) else if (c.vk != 0) vks.add(c.vk)
+            if (c.button >= 0) {
+                buttons = buttons or (1 shl c.button)
+            } else if (c.vk != 0) {
+                // A в игре — левая кнопка мыши (удар), в Bink-меню — Enter (выбор пункта).
+                vks.add(if ((passThroughMenu || menuMode) && c.id == "a") 0x0D else c.vk)
+            }
         }
         for (f in fingers.values) {
             val c = f.ctl ?: continue
