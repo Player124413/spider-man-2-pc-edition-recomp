@@ -1392,7 +1392,7 @@ void input_tick(void)
     click_tick();
     // главное меню Spider-Man 2 — Bink-заставка без GUIController: без этого признака касания
     // перехватываются экранным геймпадом и пункты «Начать новую игру» не нажимаются
-    int menu = game_menu_open(NULL) || g_menu_override || bink_movie_active();
+    int menu = game_menu_open(NULL) || g_menu_override || bink_menu_movie_active();
     g_touch_menu = menu;
     if (menu != g_menu) {
         release_all();

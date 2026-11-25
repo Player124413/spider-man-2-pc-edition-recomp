@@ -45,6 +45,7 @@ typedef struct {
     bink_video *vid;
     u32 vid_frame;         // последний декодированный кадр видео (~0u — нет)
     int movie;             // ролик из файла (Movies/*.bik), не звук в пакете
+    int menu_movie;        // заставка главного меню/логотипов, а не игровая сцена
     u32 do_frame;          // кадр последнего BinkDoFrame (~0u — не было)
     u64 tick_ns;           // последний вызов игры по этому ролику (кадр, звук, копия)
     u64 stats_ns, copy_ns; // статистика (movie_stats): начало отрезка, время перевода кадров
@@ -391,6 +392,18 @@ static void video_decode_to(bink *b, u32 f)
     movie_stats(b);
 }
 
+// Логотипы/главное меню: эти ролики не игровые сцены, пока они идут экранное управление можно спрятать
+// и передавать касания в меню. Обычные внутриигровые ролики так помечать нельзя — во время них кнопки нужны.
+static int is_menu_movie(const char *name)
+{
+    const char *base = name ? strrchr(name, '\\') : NULL;
+    if (!base) base = name ? strrchr(name, '/') : NULL;
+    base = base ? base + 1 : name;
+    if (!base) return 0;
+    return !strcasecmp(base, "Marvel.bik") || !strcasecmp(base, "ACTIVISN.bik") ||
+           !strcasecmp(base, "ESRB.bik");
+}
+
 // BinkOpen(name, flags): имя файла гостя или (BINKFROMMEMORY) указатель на данные
 void hle_binkw32__BinkOpen_8(CPU *c)
 {
@@ -400,6 +413,7 @@ void hle_binkw32__BinkOpen_8(CPU *c)
     FILE *fp = NULL;
     u32 size = 0;
     u8 hdr[44];
+    int menu_movie = 0;
     if (flags & BINKFROMMEMORY) {
         if (src < 0x10000u || src > RT_WINDOW - 44u)
             RET(2, 0);
@@ -441,6 +455,7 @@ void hle_binkw32__BinkOpen_8(CPU *c)
             RET(2, 0);
         }
         fprintf(stderr, "[bink] BinkOpen(%s) %u bytes (stream)\n", name, size);
+        menu_movie = is_menu_movie(name);
     }
     int from_file = !(flags & BINKFROMMEMORY);
     int slot = -1;
@@ -471,6 +486,7 @@ void hle_binkw32__BinkOpen_8(CPU *c)
     g_bink[slot] = b;
     b->do_frame = ~0u;
     b->movie = from_file && b->w && b->h;
+    b->menu_movie = b->movie && menu_movie;
     b->tick_ns = rt_ticks_ns();
     if (b->movie)
         fprintf(stderr, "[bink] movie %ux%u, %u frames\n", b->w, b->h, b->frames);
@@ -702,13 +718,14 @@ void hle_binkw32__BinkGetSummary_8(CPU *c)
     RET(2, 0);
 }
 
-// Активный файловый ролик — признак главного меню на Bink-заставке (когда GUI-меню движок не открыл).
-int bink_movie_active(void)
+// Активная заставка главного меню/логотипов — признак меню, когда GUI-меню движок не открыл.
+// Игровые ролики (сцены, диалоги) сюда не входят: во время них экранные кнопки должны оставаться.
+int bink_menu_movie_active(void)
 {
     u64 now = rt_ticks_ns();
     for (int i = 0; i < MAX_BINK; i++) {
         bink *b = g_bink[i];
-        if (b && b->movie && now - b->tick_ns < 250000000ull)
+        if (b && b->menu_movie && now - b->tick_ns < 250000000ull)
             return 1;
     }
     return 0;
