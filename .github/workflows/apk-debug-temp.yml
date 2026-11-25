@@ -1,0 +1,28 @@
+name: APK debug temp
+on:
+  push:
+    paths:
+      - '.github/workflows/apk-debug-temp.yml'
+permissions:
+  contents: write
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          run-id: 45575457040
+          name: Webhead2-0.1.0-29.apk
+          path: apk
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push APK to temp branch
+        run: |
+          set -euo pipefail
+          ls -l apk
+          sha256sum apk/*
+          git checkout --orphan temp/apk-debug
+          git rm -rf --cached . >/dev/null
+          git add -f apk
+          git -c user.name='Arena agent' -c user.email='agent@arena.ai' commit -q -m 'temp: apk for inspection'
+          git push -q --force origin temp/apk-debug
