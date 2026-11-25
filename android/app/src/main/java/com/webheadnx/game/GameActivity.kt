@@ -191,7 +191,7 @@ class GameActivity : SDLActivity(), InputManager.InputDeviceListener, DisplayMan
         AlertDialog.Builder(this)
             .setTitle(L.t("Меню", "Menu"))
             .setItems(arrayOf(L.t("Редактор управления", "Touch layout"),
-                L.t("Читы и уровни", "Cheats and levels"))) { _, i ->
+                L.t("Читы", "Cheats"))) { _, i ->
                 if (i == 0) openEditor() else Cheats.show(this) { touch?.invalidate() }
             }
             .setNegativeButton(L.t("Отмена", "Cancel"), null)

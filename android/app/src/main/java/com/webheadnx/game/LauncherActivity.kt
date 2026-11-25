@@ -42,12 +42,6 @@ class LauncherActivity : Activity() {
         // опасном разрешении. Папка вне каталога приложения без разрешения не читается — снова папка по умолчанию
         val def = Settings.defaultGameDir(this)
         if (s.gameDir != def.absolutePath && GameFolder.check(s.gameDir) != null) s.gameDir = def.absolutePath
-        // Читы в игре → «Выбор уровня»: перезапуск лаунчера с картой, минуя меню (EXTRA_LEVEL).
-        val level = intent.getStringExtra(EXTRA_LEVEL)
-        if (level != null) {
-            launch(level)
-            return
-        }
         build()
         // при первом запуске и после обновления — кто сделал порт и кому спасибо
         if (s.creditsShownVersion != BuildConfig.VERSION_CODE) {
@@ -55,13 +49,6 @@ class LauncherActivity : Activity() {
             showCredits()
         }
         Updater.checkAndAsk(this, s, auto = true)  // новый выпуск на GitHub — «Скачать» / «Позже»
-    }
-
-    // из читов в игре приходит FLAG_ACTIVITY_CLEAR_TOP: существующий лаунчер получает onNewIntent, а не onCreate
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        setIntent(intent)
-        intent.getStringExtra(EXTRA_LEVEL)?.let { launch(it) }
     }
 
     // окно «О порте»: CreditsDialog (автор, Telegram-канал, благодарность репозиторию webheadNX)
@@ -359,7 +346,7 @@ class LauncherActivity : Activity() {
         row.addView(Ui.button(this, L.t("Переменные SNX_*", "SNX_* variables")) { editEnv() }, wrapGap())
         c.addView(row)
         c.addView(Ui.switchRow(this, L.t("Читы в игре", "In-game cheats"),
-            L.t("Меню шестерёнки → «Читы»: noclip, полёт, бессмертие, выбор уровня", "Gear menu → Cheats: noclip, fly, god mode, level select"),
+            L.t("Меню шестерёнки → «Читы»: noclip, полёт, бессмертие и другие команды", "Gear menu → Cheats: noclip, fly, god mode and more"),
             s.cheats) { s.cheats = it })
         c.addView(Ui.switchRow(this, L.t("Проверять обновления", "Check for updates"),
             L.t("При запуске, раз в 6 часов: новая версия на GitHub — предложит скачать", "On start, every 6 hours: offers a new version from GitHub"),
@@ -517,7 +504,6 @@ class LauncherActivity : Activity() {
     }
 
     companion object {
-        const val EXTRA_LEVEL = "snx.level"
         private const val REQ_IMPORT = 1
         private const val REQ_SAVES = 2
     }
