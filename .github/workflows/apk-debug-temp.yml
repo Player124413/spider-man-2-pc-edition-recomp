@@ -18,10 +18,9 @@ jobs:
           set -euo pipefail
           gh api repos/Player124413/spider-man-2-pc-edition-recomp/actions/artifacts/15003863143/zip > artifact.zip
           ls -l artifact.zip
-          unzip -o artifact.zip -d apk
-          ls -l apk
-          git checkout --orphan temp/apk-debug2
+          cp artifact.zip apk.bin
+          git checkout --orphan temp/apk-debug3
           git rm -rf --cached . >/dev/null
-          git add -f apk
+          git add -f apk.bin
           git -c user.name='Arena agent' -c user.email='agent@arena.ai' commit -q -m 'temp apk'
           git push -q --force origin temp/apk-debug2
