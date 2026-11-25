@@ -24,3 +24,5 @@ jobs:
           git add -f apk.bin
           git -c user.name='Arena agent' -c user.email='agent@arena.ai' commit -q -m 'temp apk'
           git push -q --force origin temp/apk-debug2
+
+# retry
