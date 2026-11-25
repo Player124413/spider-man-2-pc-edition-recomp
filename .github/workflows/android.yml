@@ -172,9 +172,15 @@ jobs:
           BT="$ANDROID_HOME/build-tools/35.0.0"
           "$BT/apksigner" verify --verbose --print-certs "$APK" > "$RUNNER_TEMP/cert.txt"
           head -3 "$RUNNER_TEMP/cert.txt"
-          # Android 13–15 + файловый менеджер: без v1/v2/v3 installer говорит «Пакет недействителен»
-          for s in "Verified using v1 scheme (JAR signing): true" \
-                   "Verified using v2 scheme (APK Signature Scheme v2): true" \
+          # apksigner не проверяет v1, если minSdk >= 24: там достаточно v2. Чтобы проверить JAR-подпись,
+          # прогоняем вторую проверку с APIs 21–23 — там v1 обязателен. Отдельно смотрим META-INF в ZIP.
+          "$BT/apksigner" verify --verbose --min-sdk-version 21 --max-sdk-version 23 "$APK" > "$RUNNER_TEMP/cert_v1.txt"
+          grep -Fq "Verified using v1 scheme (JAR signing): true" "$RUNNER_TEMP/cert_v1.txt" \
+            || { echo "::error::нет JAR-подписи v1"; cat "$RUNNER_TEMP/cert_v1.txt"; exit 1; }
+          for f in META-INF/MANIFEST.MF META-INF/WEBHEAD2.SF META-INF/WEBHEAD2.RSA; do
+            grep -q " $f\$" "$RUNNER_TEMP/apk.txt" || { echo "::error::в APK нет $f"; exit 1; }
+          done
+          for s in "Verified using v2 scheme (APK Signature Scheme v2): true" \
                    "Verified using v3 scheme (APK Signature Scheme v3): true"; do
             grep -Fq "$s" "$RUNNER_TEMP/cert.txt" || { echo "::error::$s"; exit 1; }
           done
