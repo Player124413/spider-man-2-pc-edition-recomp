@@ -60,6 +60,13 @@ JNIEXPORT void JNICALL JNI_FN(menuMode)(JNIEnv *env, jclass cls, jboolean on)
 
 // Тап по пункту главного меню из overlay-View: экранное управление перехватывает MotionEvent,
 // поэтому SDL-поверхность его не получает — передаём координаты прямо в обработчик кликов.
+JNIEXPORT void JNICALL JNI_FN(mouse)(JNIEnv *env, jclass cls, jfloat u, jfloat v, jint down)
+{
+    (void)env;
+    (void)cls;
+    touch_mouse(u, v, (int)down);
+}
+
 JNIEXPORT void JNICALL JNI_FN(menuTap)(JNIEnv *env, jclass cls, jfloat u, jfloat v, jboolean down)
 {
     (void)env;

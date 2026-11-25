@@ -1278,6 +1278,11 @@ static struct {
     char down;
 } g_touch_taps[8];
 static int g_ntouch_taps;
+static struct {
+    float u, v;
+    char down;
+} g_touch_mouse[16];
+static int g_ntouch_mouse;
 static volatile int g_touch_menu, g_touch_ready, g_touch_menu_pass;
 // главное меню остаётся на экране и после того, как Bink-ролик доиграл: держим режим меню, пока не
 // появится пешка игрока (реально началась игра). Иначе экранные стики правят персонажем в меню.
@@ -1324,6 +1329,61 @@ int touch_state(void)
 }
 
 void touch_menu_override(int on) { g_menu_override = on != 0; }
+
+void touch_mouse(float u, float v, int down)
+{
+    pthread_mutex_lock(&g_touch_lock);
+    if (g_ntouch_mouse < 16) {
+        g_touch_mouse[g_ntouch_mouse].u = u;
+        g_touch_mouse[g_ntouch_mouse].v = v;
+        g_touch_mouse[g_ntouch_mouse].down = (char)down;
+        g_ntouch_mouse++;
+    }
+    pthread_mutex_unlock(&g_touch_lock);
+}
+
+// Отправляем настоящие SDL-события мыши: overlay-View перехватывает касания, и SDL их не видит.
+static void apply_touch_mouse(void)
+{
+    struct {
+        float u, v;
+        char down;
+    } evs[16];
+    int n;
+    pthread_mutex_lock(&g_touch_lock);
+    n = g_ntouch_mouse;
+    if (n > 16) n = 16;
+    memcpy(evs, g_touch_mouse, (size_t)n * sizeof evs[0]);
+    g_ntouch_mouse = 0;
+    pthread_mutex_unlock(&g_touch_lock);
+    if (!n)
+        return;
+    SDL_Window *win = SDL_GetMouseFocus();
+    if (!win)
+        win = SDL_GetWindowFromID(1);
+    int ww = 1, wh = 1;
+    if (win)
+        SDL_GetWindowSize(win, &ww, &wh);
+    static int last_x = -1, last_y = -1;
+    for (int i = 0; i < n; i++) {
+        int x = (int)(evs[i].u * (float)ww), y = (int)(evs[i].v * (float)wh);
+        SDL_Event e = {0};
+        e.type = SDL_MOUSEMOTION;
+        e.motion.x = x; e.motion.y = y;
+        e.motion.xrel = last_x < 0 ? 0 : x - last_x;
+        e.motion.yrel = last_y < 0 ? 0 : y - last_y;
+        e.motion.which = 0;
+        SDL_PushEvent(&e);
+        last_x = x; last_y = y;
+        if (evs[i].down >= 0) {
+            e = (SDL_Event){0};
+            e.type = evs[i].down ? SDL_MOUSEBUTTONDOWN : SDL_MOUSEBUTTONUP;
+            e.button.x = x; e.button.y = y; e.button.button = SDL_BUTTON_LEFT;
+            e.button.which = 0; e.button.clicks = 1;
+            SDL_PushEvent(&e);
+        }
+    }
+}
 
 // Тап по пустому месту экрана в главном меню приходит из лаунчера через JNI (overlay-View перехватывает
 // касание, поэтому SDL-поверхность его не видит). Кладём в очередь и применяем в главном потоке.
@@ -1526,6 +1586,7 @@ void input_tick(void)
             g_joy_frozen = 0;
     }
     apply_touch_taps(menu);       // тапы из overlay-View идут в click_at сразу, без SDL_FINGERDOWN
+    apply_touch_mouse();          // виртуальная мышь — через SDL_MOUSE*, как обычная мышь ПК
     // курки -> кнопки ZL/ZR
     for (int i = 0; i < 2; i++) {
         int on = pad_axis(SDL_CONTROLLER_AXIS_TRIGGERLEFT + i) > (g_trig[i] ? 0.3f : 0.5f);

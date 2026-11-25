@@ -68,7 +68,7 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
     private val rect = RectF()
 
     // ---------------------------------------------------------------- состояние пальцев (игра)
-    private enum class Bind { NONE, CONTROL, LOOK, GEAR, SLOT, MENU_TAP }
+    private enum class Bind { NONE, CONTROL, LOOK, GEAR, SLOT, MENU_TAP, MOUSE }
     // combo — пока палец держал «Зелья», жали другую кнопку (ZL+A и т. п.): тогда при отпускании слот не пьётся
     private class Finger(var bind: Bind = Bind.NONE, var ctl: Control? = null, var lastX: Float = 0f, var lastY: Float = 0f,
                          var combo: Boolean = false)
@@ -347,6 +347,12 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
         }
         val c = hit(x, y, ALL_KINDS)
         if (c != null) {
+            if (c.id == "mouse") {
+                f.bind = Bind.MOUSE
+                SnxNative.mouse(x / max(1f, w()), y / max(1f, h()), 1)
+                invalidate()
+                return
+            }
             f.bind = Bind.CONTROL
             f.ctl = c
             if (c.kind == Kind.BUTTON && c.id != POTION_ID) markCombo()
@@ -377,6 +383,7 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
     private fun move(id: Int, x: Float, y: Float) {
         val f = fingers[id] ?: return
         when (f.bind) {
+            Bind.MOUSE -> SnxNative.mouse(x / max(1f, w()), y / max(1f, h()), -1)
             Bind.LOOK -> {
                 val k = settings.lookSensitivity * 1000f / max(1f, h())
                 SnxNative.look((x - f.lastX) * k, (y - f.lastY) * k)
@@ -408,6 +415,10 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
         val f = fingers.remove(id) ?: return
         if (f.bind == Bind.MENU_TAP) {
             SnxNative.menuTap(x / max(1f, w()), y / max(1f, h()), false)
+            return
+        }
+        if (f.bind == Bind.MOUSE) {
+            SnxNative.mouse(x / max(1f, w()), y / max(1f, h()), 0)
             return
         }
         if (f.bind == Bind.GEAR && onGearAt(x, y)) onGear?.invoke()
@@ -489,8 +500,10 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
     }
 
     fun releaseAll() {
-        for (f in fingers.values)
+        for (f in fingers.values) {
             if (f.bind == Bind.MENU_TAP) SnxNative.menuTap(f.lastX / max(1f, w()), f.lastY / max(1f, h()), false)
+            if (f.bind == Bind.MOUSE) SnxNative.mouse(f.lastX / max(1f, w()), f.lastY / max(1f, h()), 0)
+        }
         fingers.clear()
         sticks.values.forEach { it.pointer = -1; it.vx = 0f; it.vy = 0f }
         dpadMask = 0

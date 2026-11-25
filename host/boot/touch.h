@@ -25,6 +25,9 @@ void touch_menu_override(int on);
 // Тап по главному меню на Bink-заставке: доли окна и признак нажатия. Применяется в input_tick в главном
 // потоке, чтобы клик уходил в гостя сразу, без ожидания GUIController (в главном меню его ActivePage пуст).
 void touch_menu_tap(float u, float v, int down);
+// Виртуальная мышь: -1 — только движение курсора, 1/0 — нажатие/отпускание ЛКМ. События уходят в SDL
+// как настоящие SDL_MOUSEMOTION/SDL_MOUSEBUTTON*, поэтому меню видит их обычным путём.
+void touch_mouse(float u, float v, int down);
 
 #ifdef __cplusplus
 }

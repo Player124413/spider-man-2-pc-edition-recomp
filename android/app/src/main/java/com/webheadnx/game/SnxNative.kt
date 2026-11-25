@@ -34,6 +34,8 @@ object SnxNative {
     // тап по пустому месту в главном меню: координаты в долях экрана (SDL-поверхность не видит касание
     // под overlay-_view, поэтому клик передаётся напрямую в гостевой обработчик мыши)
     @JvmStatic external fun menuTap(x: Float, y: Float, down: Boolean)
+    // виртуальная мышь: down 1/0 — ЛКМ вниз/вверх, -1 — только перемещение; координаты в долях окна
+    @JvmStatic external fun mouse(x: Float, y: Float, down: Int)
     // частота экрана и ограничение FPS: равны — кадры отмеряет vsync (platform/window.c plat_set_display)
     @JvmStatic external fun display(hz: Float, fpsCap: Int)
     // сбросить файлы гостя и завершить процесс :game (выход кнопкой «Назад»)

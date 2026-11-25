@@ -53,6 +53,8 @@ object TouchLayout {
         Control("rs", Kind.BUTTON, L.t("Центр", "Center"), 0.93f, 0.33f, 0.11f, visible = false, button = SnxNative.RSTICK),
         Control("esc", Kind.BUTTON, "Esc", 0.50f, 0.07f, 0.10f, visible = false, vk = 0x1B),
         Control("enter", Kind.BUTTON, L.t("Паутина", "Web"), 0.93f, 0.45f, 0.14f, visible = true, vk = 0x0D),
+        // виртуальная мышь: тап/перетаскивание посылает SDL_MOUSE*, меню видит её как обычную мышь ПК
+        Control("mouse", Kind.BUTTON, "Mouse", 0.50f, 0.90f, 0.12f, visible = true),
     ) + (1..9).map { n ->
         // зелья 1–9 — цифры клавиатуры (как в игре на ПК)
         Control("potion$n", Kind.BUTTON, "$n", 0.30f + 0.055f * (n - 1), 0.30f, 0.09f, visible = false, vk = 0x30 + n)
