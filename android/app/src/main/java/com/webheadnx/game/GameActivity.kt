@@ -186,7 +186,17 @@ class GameActivity : SDLActivity(), InputManager.InputDeviceListener, DisplayMan
     }
 
     // шестерёнка: редактор раскладки. Читы из Shrek 2 в Spider-Man 2 не работают — меню убрано.
-    private fun gearMenu() = openEditor()
+    private fun gearMenu() {
+        if (!settings.cheats) return openEditor()
+        AlertDialog.Builder(this)
+            .setTitle(L.t("Меню", "Menu"))
+            .setItems(arrayOf(L.t("Редактор управления", "Touch layout"),
+                L.t("Читы и уровни", "Cheats and levels"))) { _, i ->
+                if (i == 0) openEditor() else Cheats.show(this) { touch?.invalidate() }
+            }
+            .setNegativeButton(L.t("Отмена", "Cancel"), null)
+            .show()
+    }
 
     // редактор поверх игры (игра идёт дальше, экранный геймпад отпущен)
     private fun openEditor() {

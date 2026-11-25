@@ -2,8 +2,10 @@ package com.webheadnx.game
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.Intent
 import android.os.Handler
 import android.os.Looper
+import android.os.Process
 
 // Читы поверх игры: команды игры привязаны к клавишам цифрового блока (host/boot/config.c, g_cheat_bindings —
 // тот же список, SNX_CHEATS=1 от лаунчера), меню нажимает клавишу. Открывается шестерёнкой (при включённых
@@ -29,10 +31,26 @@ object Cheats {
         h.postDelayed({ try { SnxNative.key(vk, false) } catch (e: UnsatisfiedLinkError) {} }, 350)
     }
 
+    // Выбор уровня из читов: игра в процессе :game, поэтому сначала уходим в лаунчер, а он перезапускает
+    // игру уже на выбранной карте (LauncherActivity.EXTRA_LEVEL → gameArgs(map)).
+    private fun level(a: Activity, map: String) {
+        a.startActivity(Intent(a, LauncherActivity::class.java)
+            .putExtra(LauncherActivity.EXTRA_LEVEL, map)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP))
+        Handler(Looper.getMainLooper()).postDelayed({
+            try { SnxNative.exitNow() } catch (e: UnsatisfiedLinkError) {}
+            Process.killProcess(Process.myPid())
+        }, 400)
+    }
+
     fun show(a: Activity, onDismiss: () -> Unit) {
+        val items = listOf(L.t("Выбор уровня…", "Level select…")) + LIST.map { L.t(it.ru, it.en) }
         AlertDialog.Builder(a)
             .setTitle(L.t("Читы", "Cheats"))
-            .setItems(LIST.map { L.t(it.ru, it.en) }.toTypedArray()) { _, i -> send(LIST[i].vk) }
+            .setItems(items.toTypedArray()) { _, i ->
+                if (i == 0) Levels.show(a, Settings(a).gameDir) { map -> level(a, map) }
+                else send(LIST[i - 1].vk)
+            }
             .setNegativeButton(L.t("Закрыть", "Close"), null)
             .setOnDismissListener { onDismiss() }
             .show()

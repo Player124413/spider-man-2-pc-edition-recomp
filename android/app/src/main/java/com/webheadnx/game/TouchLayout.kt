@@ -35,10 +35,11 @@ object TouchLayout {
     // 5: убрали кнопку зелий; 6: A/B шлют клавиши мыши/Ctrl, Minus виден для пропуска роликов;
     // 7: минимальный набор — только стик, удар, прыжок, паутина, пропуск, меню. Крестовина/ZL/правый стик скрыты.
     // 8: кнопка Mouse убрана — виртуальная мышь работает по умолчанию (тап по пустому месту в меню).
-    private const val VERSION = 8
+    // 9: кнопка Enter («Паутина») убрана из сенсорного управления по просьбе — меню выбирается мышью.
+    private const val VERSION = 9
 
-    // Минимальный набор по экрану «Управление» в игре: ЛКМ — удар, Ctrl — прыжок, Enter — паутина/действие,
-    // Space — пропуск ролика. Левый стик — движение, палец по пустому месту — камера. Всё остальное скрыто.
+    // Минимальный набор по экрану «Управление» в игре: ЛКМ — удар, Ctrl — прыжок, Space — пропуск ролика.
+    // Левый стик — движение, палец по пустому месту — камера. Enter из сенсорного управления убран.
     fun defaults(): List<Control> = listOf(
         Control("lstick", Kind.STICK, "", 0.14f, 0.70f, 0.38f),  // статичный: не ездит под пальцем
         // A/B как клавиши: в Spider-Man 2 Joy2 через раз не давал двойной прыжок, а Fire надёжнее левой кнопки мыши.
@@ -53,7 +54,6 @@ object TouchLayout {
         Control("minus", Kind.BUTTON, L.t("Пропуск", "Skip"), 0.42f, 0.07f, 0.12f, visible = true, vk = 0x20),
         Control("rs", Kind.BUTTON, L.t("Центр", "Center"), 0.93f, 0.33f, 0.11f, visible = false, button = SnxNative.RSTICK),
         Control("esc", Kind.BUTTON, "Esc", 0.50f, 0.07f, 0.10f, visible = false, vk = 0x1B),
-        Control("enter", Kind.BUTTON, L.t("Паутина", "Web"), 0.93f, 0.45f, 0.14f, visible = true, vk = 0x0D),
     ) + (1..9).map { n ->
         // зелья 1–9 — цифры клавиатуры (как в игре на ПК)
         Control("potion$n", Kind.BUTTON, "$n", 0.30f + 0.055f * (n - 1), 0.30f, 0.09f, visible = false, vk = 0x30 + n)
@@ -78,7 +78,7 @@ object TouchLayout {
                 // обновляем раскладку без потери пользовательских позиций: зелья убраны, пропуск добавлен
                 // минимальный набор: лишние элементы из старых раскладок не показываем
                 if (c.id == "zl" || c.id == "dpad" || c.id == "rstick" || c.id.startsWith("potion")) c.visible = false
-                if (c.id == "minus" || c.id == "enter") c.visible = true
+                if (c.id == "minus") c.visible = true
                 if (c.id == "mouse") c.visible = false  // отдельная кнопка мыши убрана: она теперь в каждом тапе меню
                 c.opacity = o.optDouble("opacity", c.opacity.toDouble()).toFloat().coerceIn(0.1f, 1f)
                 if (ver >= 2) c.floating = o.optBoolean("floating", c.floating)

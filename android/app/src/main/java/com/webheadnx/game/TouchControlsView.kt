@@ -548,8 +548,9 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
             if (c.button >= 0) {
                 buttons = buttons or (1 shl c.button)
             } else if (c.vk != 0) {
-                // A в игре — левая кнопка мыши (удар), в Bink-меню — Enter (выбор пункта).
-                vks.add(if (passThroughMenu && c.id == "a") 0x0D else c.vk)
+                // A в игре — левая кнопка мыши (удар). Enter в сенсорном управлении больше не шлём:
+                // пункты меню выбираются виртуальной мышью.
+                vks.add(c.vk)
             }
         }
         for (f in fingers.values) {
