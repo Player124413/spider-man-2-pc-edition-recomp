@@ -10,19 +10,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Download artifact
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Just push a marker
         run: |
-          set -uo pipefail
-          gh api repos/Player124413/spider-man-2-pc-edition-recomp/actions/artifacts/15003863143/zip > artifact.zip 2>err.txt || true
-          ls -l artifact.zip err.txt > log.txt 2>&1 || true
-          head -c 1000 err.txt >> log.txt 2>&1 || true
-          unzip -o artifact.zip -d apk >> log.txt 2>&1 || true
-          ls -l apk >> log.txt 2>&1 || true
-          cat log.txt
-          git checkout --orphan temp/apk-debug
-          git rm -rf --cached . >/dev/null
-          git add -f apk log.txt
-          git -c user.name='Arena agent' -c user.email='agent@arena.ai' commit -q -m 'temp apk'
-          git push -q --force origin temp/apk-debug
+          echo marker > marker.txt
+          git add -f marker.txt
+          git -c user.name='Arena agent' -c user.email='agent@arena.ai' commit -q -m 'temp marker'
+          git push -q --force origin HEAD:refs/heads/temp/apk-debug
