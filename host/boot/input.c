@@ -1293,6 +1293,7 @@ static volatile int g_menu_override;
 // Клик по пункту меню: защёлка меню снимается только после реального выбора, а не просто потому,
 // что в кадре стало много draw-вызовов (иначе стик начинал двигать героя прямо в главном меню).
 static volatile int g_menu_clicked;
+static u32 g_mouse_click_release;  // отпускание ЛКМ после тапа виртуальной мышью
 
 void touch_pad(uint32_t buttons, float lx, float ly, float rx, float ry)
 {
@@ -1376,7 +1377,7 @@ static void apply_touch_mouse(void)
         if (v < 0.f) v = 0.f;
         if (v > 1.f) v = 1.f;
         int x = (int)(u * (float)ww), y = (int)(v * (float)wh);
-        if (evs[i].down > 0)
+        if (evs[i].down == 1 || evs[i].down == 2)
             g_menu_clicked = 1;
         if (log_touch() && diag_mouse++ < 24)
             fprintf(stderr, "[touch] virtual mouse %.2f,%.2f -> %d,%d down=%d\n", (double)u, (double)v, x, y,
@@ -1389,7 +1390,12 @@ static void apply_touch_mouse(void)
         e.motion.which = 0;
         SDL_PushEvent(&e);
         last_x = x; last_y = y;
-        if (evs[i].down >= 0) {
+        if (evs[i].down == 2) {
+            // Тап: щёлкаем через общий helper меню — он одинаково работает в Bink-заставке и в GUI,
+            // сам ставит курсор в точку касания и посылает WM_MOUSEMOVE перед нажатием.
+            touch(u, v);
+            g_mouse_click_release = SDL_GetTicks() + 90;
+        } else if (evs[i].down >= 0) {
             e = (SDL_Event){0};
             e.type = evs[i].down ? SDL_MOUSEBUTTONDOWN : SDL_MOUSEBUTTONUP;
             e.button.x = x; e.button.y = y; e.button.button = SDL_BUTTON_LEFT;
@@ -1397,6 +1403,8 @@ static void apply_touch_mouse(void)
             SDL_PushEvent(&e);
         }
     }
+    // Курсор игры показывается при наведении: пальцем водим по меню как мышью.
+    game_menu_cursor(1);
 }
 
 // Тап по пустому месту экрана в главном меню приходит из лаунчера через JNI (overlay-View перехватывает
@@ -1577,6 +1585,10 @@ void input_tick(void)
         key(0x0D, 0);
         g_select_release = 0;
     }
+    if (g_mouse_click_release && (s32)(now_key - g_mouse_click_release) >= 0) {
+        click_release();
+        g_mouse_click_release = 0;
+    }
     // главное меню Spider-Man 2 — Bink-заставка без GUIController: без этого признака касания
     // перехватываются экранным геймпадом и пункты «Начать новую игру» не нажимаются
     int gui_menu = game_menu_open(NULL);
@@ -1596,6 +1608,7 @@ void input_tick(void)
     if (menu != g_menu) {
         release_all();
         g_menu = menu;
+        game_menu_cursor(menu != 0);
         g_nav_dir = -1;
         if (!menu) {
             g_joy_frozen = 0;

@@ -54,6 +54,11 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
     }
     private val grid = Paint().apply { strokeWidth = 1f; color = 0x22FFFFFF }
     private val bmpPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    private val mousePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        color = 0xE6FFFFFF.toInt()
+        strokeWidth = 2f * density
+    }
     private val nameText = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textAlign = Paint.Align.CENTER
         isFakeBoldText = true
@@ -71,13 +76,16 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
     private enum class Bind { NONE, CONTROL, LOOK, GEAR, SLOT, MENU_TAP }
     // combo — пока палец держал «Зелья», жали другую кнопку (ZL+A и т. п.): тогда при отпускании слот не пьётся
     private class Finger(var bind: Bind = Bind.NONE, var ctl: Control? = null, var lastX: Float = 0f, var lastY: Float = 0f,
-                         var combo: Boolean = false)
+                         var startX: Float = 0f, var startY: Float = 0f, var combo: Boolean = false)
     private val fingers = HashMap<Int, Finger>()
 
     private class StickState(var pointer: Int = -1, var cx: Float = 0f, var cy: Float = 0f, var vx: Float = 0f, var vy: Float = 0f)
     private val sticks = HashMap<String, StickState>()
     private val latched = HashSet<String>()      // залипшие кнопки (toggle)
     private var dpadMask = 0                      // крестовина: биты DPAD_*
+    private var walkKeyDir = 0                    // запасной W/S для перед/назад, если игра не читает JoyY
+    private var mouseX = -1f                      // видимый курсор виртуальной мыши в меню
+    private var mouseY = -1f
 
     private var sentButtons = -1
     private var sentAxes = FloatArray(4) { Float.NaN }
@@ -99,7 +107,8 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
         (!hiddenByMenu && !hiddenByGamepad && settings.touchEnabled)
     private fun controlsVisible(): Boolean = editMode ||
         (!hiddenByMenu && !hiddenByGamepad && settings.touchEnabled)
-    private fun menuTapAt(x: Float, y: Float): Boolean = (passThroughMenu || hiddenByMenu || menuOverride) &&
+    private fun menuActive() = passThroughMenu || hiddenByMenu || menuOverride
+    private fun menuTapAt(x: Float, y: Float): Boolean = menuActive() &&
         hit(x, y, ALL_KINDS) == null && slotArrowAt(x, y) == 0 && floatingStickAt(x) == null &&
         !onGearAt(x, y)
 
@@ -126,8 +135,20 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
                 }
             }
         }
-        if (!editMode)
+        if (!editMode) {
             drawGear(canvas)
+            if (mouseX >= 0f && menuActive()) drawMouseCursor(canvas)
+        }
+    }
+
+    // Курсор рисуется поверх игрового: пальцем водим по меню как мышью, и видно, куда нацелились.
+    private fun drawMouseCursor(canvas: Canvas) {
+        val r = 9f * density
+        canvas.drawCircle(mouseX, mouseY, r, mousePaint)
+        canvas.drawLine(mouseX - r * 1.7f, mouseY, mouseX - r * 0.5f, mouseY, mousePaint)
+        canvas.drawLine(mouseX + r * 0.5f, mouseY, mouseX + r * 1.7f, mouseY, mousePaint)
+        canvas.drawLine(mouseX, mouseY - r * 1.7f, mouseX, mouseY - r * 0.5f, mousePaint)
+        canvas.drawLine(mouseX, mouseY + r * 0.5f, mouseX, mouseY + r * 1.7f, mousePaint)
     }
 
     private fun drawGrid(canvas: Canvas) {
@@ -328,13 +349,16 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
     }
 
     private fun down(id: Int, x: Float, y: Float) {
-        val f = Finger(lastX = x, lastY = y)
+        val f = Finger(lastX = x, lastY = y, startX = x, startY = y)
         fingers[id] = f
         if (onGearAt(x, y)) { f.bind = Bind.GEAR; return }
         if (menuTapAt(x, y)) {
             f.bind = Bind.MENU_TAP
-            // Настоящие SDL-события мыши: курсор встаёт под палец, ЛКМ нажата до отпускания пальца.
-            SnxNative.mouse(x / max(1f, w()), y / max(1f, h()), 1)
+            mouseX = x
+            mouseY = y
+            // Курсор ведём без нажатой кнопки; сам щелчок — по отпусканию, если палец не сдвинулся.
+            SnxNative.mouse(x / max(1f, w()), y / max(1f, h()), -1)
+            invalidate()
             return
         }
         if (!active()) return
@@ -380,7 +404,12 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
     private fun move(id: Int, x: Float, y: Float) {
         val f = fingers[id] ?: return
         when (f.bind) {
-            Bind.MENU_TAP -> SnxNative.mouse(x / max(1f, w()), y / max(1f, h()), -1)
+            Bind.MENU_TAP -> {
+                mouseX = x
+                mouseY = y
+                invalidate()
+                SnxNative.mouse(x / max(1f, w()), y / max(1f, h()), -1)
+            }
             Bind.LOOK -> {
                 val k = settings.lookSensitivity * 1000f / max(1f, h())
                 SnxNative.look((x - f.lastX) * k, (y - f.lastY) * k)
@@ -411,7 +440,12 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
     private fun up(id: Int, x: Float, y: Float) {
         val f = fingers.remove(id) ?: return
         if (f.bind == Bind.MENU_TAP) {
-            SnxNative.mouse(x / max(1f, w()), y / max(1f, h()), 0)
+            mouseX = x
+            mouseY = y
+            // Тап = щелчок в точке пальца. Перетаскивание = только наведение (ползунки/подсветка).
+            if (hypot(x - f.startX, y - f.startY) < 12f * density)
+                SnxNative.mouse(x / max(1f, w()), y / max(1f, h()), 2)
+            invalidate()
             return
         }
         if (f.bind == Bind.GEAR && onGearAt(x, y)) onGear?.invoke()
@@ -494,7 +528,7 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
 
     fun releaseAll() {
         for (f in fingers.values)
-            if (f.bind == Bind.MENU_TAP) SnxNative.mouse(f.lastX / max(1f, w()), f.lastY / max(1f, h()), 0)
+            if (f.bind == Bind.MENU_TAP) SnxNative.mouse(f.lastX / max(1f, w()), f.lastY / max(1f, h()), -1)
         fingers.clear()
         sticks.values.forEach { it.pointer = -1; it.vx = 0f; it.vy = 0f }
         dpadMask = 0
@@ -531,6 +565,20 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
             if (abs(st.vx) > abs(ax[o])) ax[o] = st.vx
             if (abs(st.vy) > abs(ax[o + 1])) ax[o + 1] = st.vy
         }
+        // Spider-Man 2 иногда игнорирует JoyY (влево/вправо через JoyX работает). Дублируем перед/назад
+        // клавишами W/S с гистерезисом, чтобы не дребезжать у порога. Ось при этом остаётся аналоговой.
+        val wy = ax[1]
+        val enterKey = 0.35f
+        val exitKey = 0.15f
+        walkKeyDir = when {
+            walkKeyDir == 0 && wy < -enterKey -> -1   // палец вверх — вперёд (JoyY в User.ini инвертирован)
+            walkKeyDir == 0 && wy > enterKey -> 1
+            walkKeyDir == -1 && wy < -exitKey -> -1
+            walkKeyDir == 1 && wy > exitKey -> 1
+            else -> 0
+        }
+        if (walkKeyDir < 0) vks.add(0x57) else if (walkKeyDir > 0) vks.add(0x53)
+
         if (buttons != sentButtons || !ax.contentEquals(sentAxes)) {
             try {
                 SnxNative.pad(buttons, ax[0], ax[1], ax[2], ax[3])
