@@ -1400,9 +1400,9 @@ static void diag_tick(void)
     dinput8_stats(st);
     int x = 0, y = 0;
     int ready = d3d8_window_to_target(0.5f, 0.5f, &x, &y);
-    fprintf(stderr, "[touch] t=%us ticks=%u focus=%x menu=%d latch=%d ready=%d center=%d,%d pad=%u taps=%u buttons=%x "
+    fprintf(stderr, "[touch] t=%us ticks=%u focus=%x menu=%d latch=%d draws=%d ready=%d center=%d,%d pad=%u taps=%u buttons=%x "
                     "lx=%.2f ly=%.2f | dinput: mouse %u joy %u unacquired %u acquire %u\n",
-            now / 1000, g_diag_ticks, user32_focus(), g_menu, g_menu_latch, ready, x, y, g_diag_pad, g_diag_taps, g_touch_applied,
+            now / 1000, g_diag_ticks, user32_focus(), g_menu, g_menu_latch, d3d8_frame_draws(), ready, x, y, g_diag_pad, g_diag_taps, g_touch_applied,
             (double)g_touch_ax[0], (double)g_touch_ax[1], st[0], st[1], st[2], st[3]);
     for (int i = 0; i < MAX_PADS; i++)  // геймпады: правый стик сейчас и число событий осей (камера «пропадает»)
         if (g_pads[i].id >= 0 && g_pads[i].events)
@@ -1499,8 +1499,10 @@ void input_tick(void)
         g_menu_latch = 1;
     if (menu_movie && gui_menu)
         g_menu_latch = 0;
-    if (game_player_active())
-        g_menu_latch = 0;  // герой появился в мире — это уже игра, меню закончилось
+    // Надёжный признак игры: живая пешка ИЛИ десятки draw-вызовов. В главном меню Bink рисует 1–3 draw,
+    // поэтому защёлка-menu снимается как только начинается сцена — даже если UObject-пешка не находится.
+    if (game_player_active() || d3d8_frame_draws() > 12)
+        g_menu_latch = 0;
     int menu = gui_menu || g_menu_override || menu_movie || g_menu_latch;
     g_touch_menu = gui_menu;      // только настоящее GUI-меню прячет экранные кнопки
     g_touch_menu_pass = menu;     // главное меню на ролике: касания мышью, но кнопки видны

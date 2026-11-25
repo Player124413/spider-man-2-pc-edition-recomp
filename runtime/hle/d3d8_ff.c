@@ -2990,6 +2990,8 @@ static void movie_overlay(d3ddev *d)
     g_movie_overlay_ns = rt_ticks_ns();
 }
 
+static u32 g_last_frame_draws;  // сохраняем перед сбросом в Present: хост читает значение в input_tick
+
 void d3d8_present(d3ddev *d)
 {
     game_menu_frame(d->bb_w, d->bb_h);  // состояние меню игры — для ввода хоста и 4:3-режима
@@ -3092,11 +3094,18 @@ void d3d8_present(d3ddev *d)
         fps_t0 = now;
         fps_frame0 = d->frame;
     }
+    g_last_frame_draws = d->draws;
     d->draws = 0;
     cs_swap();
     frame_pace();
     cs_cmd_push(x_post_present, &d, sizeof d);
     d->frame++;
+}
+
+
+int d3d8_frame_draws(void)
+{
+    return (int)g_last_frame_draws;
 }
 
 int d3d8_window_to_target(float u, float v, int *x, int *y)

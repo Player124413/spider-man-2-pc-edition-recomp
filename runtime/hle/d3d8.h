@@ -11,6 +11,9 @@ void d3d8_fill_caps(u32 caps);  // D3DCAPS8 (0xD4 байт) по гостево�
 // Точка окна (доли его ширины/высоты) -> пиксель заднего буфера с учётом вписывания кадра. 0 — устройства нет.
 int d3d8_window_to_target(float u, float v, int *x, int *y);
 int d3d8_target_to_window(float x, float y, float *u, float *v);  // обратное
+// Число draw-вызовов в последнем кадре: главное меню на Bink рисует 1–3, игра — десятки. Используется хостом,
+// чтобы отличить меню от игры, когда GUIController и пешка игрока ещё/уже недоступны.
+int d3d8_frame_draws(void);
 // BinkCopyToBuffer положил кадр w x h в (x, y) от гостевого адреса dest с шагом pitch: если это залоченная цель
 // рендера, при Unlock кадр растягивается на неё с сохранением пропорций (ролики 640x480/800x600 в 1080p).
 void d3d8_movie_frame(u32 dest, u32 pitch, u32 x, u32 y, u32 w, u32 h);
