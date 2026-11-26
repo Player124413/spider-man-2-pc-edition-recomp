@@ -6,6 +6,7 @@
 
 #include "host/boot/touch.h"
 #include "platform/window.h"
+#include "runtime/hle/d3d8.h"
 #include "runtime/hle/hle.h"
 
 #define JNI_FN(name) Java_com_webheadnx_game_SnxNative_##name
@@ -72,6 +73,15 @@ JNIEXPORT void JNICALL JNI_FN(menuTap)(JNIEnv *env, jclass cls, jfloat u, jfloat
     (void)env;
     (void)cls;
     touch_menu_tap(u, v, down ? 1 : 0);
+}
+
+// Диагностика кадра поверх картинки: цвет заливки, туман, TextureFactor и первые отрисовки кадра. Пишет поток
+// рендера, показывает поток гостя (d3d8_present) — вызов безопасен в любой момент.
+JNIEXPORT void JNICALL JNI_FN(diag)(JNIEnv *env, jclass cls, jboolean on)
+{
+    (void)env;
+    (void)cls;
+    d3d8_set_diag(on ? 1 : 0);
 }
 
 // Частота экрана (режим, выбранный GameActivity под ограничение FPS, или смена частоты системой) и ограничение

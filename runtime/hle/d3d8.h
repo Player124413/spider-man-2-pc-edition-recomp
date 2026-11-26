@@ -20,6 +20,10 @@ void d3d8_movie_frame(u32 dest, u32 pitch, u32 x, u32 y, u32 w, u32 h);
 // Счётчик кадров поверх картинки (Snx.ini [Overlay] ShowFPS, на ходу — кнопкой)
 void d3d8_set_fps_overlay(int on);
 int d3d8_fps_overlay(void);
+// Диагностика кадра поверх картинки (лаунчер: «Диагностика кадра», SNX_DIAG=1): цвет заливки Clear, туман,
+// TextureFactor и состояние первых отрисовок кадра — по скриншоту видно, откуда взялся цвет на экране
+void d3d8_set_diag(int on);
+int d3d8_diag(void);
 // Режим 4:3-pillarbox для страниц меню на широком экране (выключен по умолчанию; согласован с 3D-камерой и вводом)
 void d3d8_set_menu_aspect(int on);
 int d3d8_menu_aspect(void);

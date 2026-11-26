@@ -57,6 +57,8 @@ class GameActivity : SDLActivity(), InputManager.InputDeviceListener, DisplayMan
         }
         val t = TouchControlsView(this, settings, editMode = false)
         t.onGear = { gearMenu() }
+        // диагностика кадра из прошлого запуска: включаем до первого кадра (переключатель — тоже на ходу)
+        try { SnxNative.diag(settings.diag) } catch (e: UnsatisfiedLinkError) { }
         SDLActivity.mLayout.addView(t, RelativeLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         touch = t
         inputManager = (getSystemService(Context.INPUT_SERVICE) as InputManager).also {
@@ -223,6 +225,11 @@ class GameActivity : SDLActivity(), InputManager.InputDeviceListener, DisplayMan
         })
         c.addView(Ui.switchRow(this, L.t("Вибрация кнопок", "Button vibration"), null, settings.haptics) {
             settings.haptics = it
+        })
+        // разбор картинки по скриншоту: цвет заливки, туман, TextureFactor и первые отрисовки кадра
+        c.addView(Ui.switchRow(this, L.t("Диагностика кадра", "Frame diagnostics"), null, settings.diag) {
+            settings.diag = it
+            try { SnxNative.diag(it) } catch (e: UnsatisfiedLinkError) { }
         })
         AlertDialog.Builder(this)
             .setTitle(L.t("Настройки", "Settings"))

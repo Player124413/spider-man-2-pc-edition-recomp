@@ -129,6 +129,10 @@ typedef struct {
 #endif
 } ffkey;
 
+// диагностика кадра (ниже): пишем состояние первых отрисовок кадра, показываем поверх картинки
+static void diag_record(const d3d_rstate *r, const ffkey *k);
+static _Atomic u32 g_diag_clear;  // последний цвет заливки заднего буфера (пишет x_clear)
+
 typedef struct {
     ffkey key;
     u32 hash;
@@ -434,7 +438,11 @@ static void gen_vs(const ffkey *k, sbuf *b)
     // туман: v_fog — коэффициент (1 — без тумана) или глубина для попиксельного
     switch (k->fog) {
     case FOG_SPECULAR:
-        put(b, "  v_fog = v_col1.a;\n");
+        // D3D8: FOGENABLE без табличного и вершинного режимов — коэффициент тумана в альфе specular-цвета.
+        // Если specular в формате вершины нет, аппаратура берёт 1.0 (тумана нет): раньше здесь всегда было
+        // v_col1.a = 0, и такие отрисовки (небо рисуется именно так — без вершинных цветов) заливались
+        // сплошным цветом тумана вместо своей текстуры.
+        put(b, "  v_fog = %s;\n", (k->inputs & (1u << 6)) ? "v_col1.a" : "1.0");
         break;
     case FOG_VERTEX:
         put(b, "  float fd = %s;\n", k->rangefog ? "length(epos.xyz)" : "abs(epos.z)");
@@ -2107,6 +2115,8 @@ static void x_clear(void *p)
     GLbitfield mask = 0;
     if (flags & 1) {
         mask |= GL_COLOR_BUFFER_BIT;
+        if (!r->rt)
+            atomic_store_explicit(&g_diag_clear, color, memory_order_relaxed);  // цвет фона кадра — для диагностики
         glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
         glClearColor((float)((color >> 16) & 0xFF) / 255.0f, (float)((color >> 8) & 0xFF) / 255.0f,
                      (float)(color & 0xFF) / 255.0f, (float)(color >> 24) / 255.0f);
@@ -2181,6 +2191,7 @@ static void exec_draw(d3d_rstate *r, u32 prim, u32 count, int indexed, u32 first
     }
     if (dumping_frame(r->frame))
         dump_draw(r, &g_cached_key, prim, count, indexed);
+    diag_record(r, &g_cached_key);
     ffprog *p = g_cached_prog;
     if (!p || !p->prog)
         return;
@@ -2540,6 +2551,161 @@ static _Atomic int g_fps_overlay;
 void d3d8_set_fps_overlay(int on) { g_fps_overlay = on; }
 int d3d8_fps_overlay(void) { return g_fps_overlay; }
 
+// ================================================================ диагностика кадра
+// Включается на ходу: «Настройки» → «Диагностика кадра». Нужна, чтобы по одному скриншоту с телефона понять,
+// откуда взялся цвет на экране: фон заливки Clear, туман, TextureFactor/материал или стадии текстуры. Сверху —
+// доминирующий цвет двух полос заднего буфера ДО гаммы Present (совпадает ли он с Clear/туманом), ниже —
+// состояние первых четырёх отрисовок кадра (стадии, texgen, texture transform, туман, смешивание, z-тест).
+#define DIAG_DRAWS 4
+static _Atomic int g_diag = -1;  // -1 — ещё не читали SNX_DIAG (лаунчер: «Диагностика кадра»)
+
+void d3d8_set_diag(int on) { atomic_store_explicit(&g_diag, on != 0, memory_order_relaxed); }
+
+int d3d8_diag(void)
+{
+    int v = atomic_load_explicit(&g_diag, memory_order_relaxed);
+    if (v < 0) {  // первый опрос: значение из окружения (лаунчер передаёт SNX_DIAG)
+        const char *e = getenv("SNX_DIAG");
+        v = e && *e && *e != '0';
+        atomic_store_explicit(&g_diag, v, memory_order_relaxed);
+    }
+    return v;
+}
+
+typedef struct {
+    u32 nstages, tex, tci, gen, ttf, proj, tf, fogc, flags;
+} diag_rec;
+
+static diag_rec g_diag_rec[DIAG_DRAWS];  // пишет поток рендера, читает поток гостя (только для показа)
+static _Atomic int g_diag_n;             // сколько отрисовок кадра записано (0..DIAG_DRAWS)
+
+static void diag_record(const d3d_rstate *r, const ffkey *k)
+{
+    if (!d3d8_diag())
+        return;
+    int i = atomic_load_explicit(&g_diag_n, memory_order_relaxed);
+    if (i >= DIAG_DRAWS)
+        return;
+    diag_rec q;
+    memset(&q, 0, sizeof q);
+    q.nstages = k->nstages;
+    for (int s = 0; s < k->nstages && s < 8; s++) {
+        q.tex |= (u32)k->st[s].tex << (2 * s);
+        if (k->st[s].tci)
+            q.tci |= 1u << s;
+        q.gen |= (u32)k->st[s].tcgen << (2 * s);
+        q.ttf |= (u32)k->st[s].ttf_count << (2 * s);
+        if (k->st[s].ttf_proj)
+            q.proj |= 1u << s;
+    }
+    q.tf = r->rs[60];   // D3DRS_TEXTUREFACTOR
+    q.fogc = r->rs[34]; // D3DRS_FOGCOLOR
+    q.flags = (u32)(k->fog & 3) | (r->rs[28] ? 4u : 0u) | (r->rs[27] ? 8u : 0u) | (k->lighting ? 16u : 0u) |
+              (r->rs[7] ? 32u : 0u) | (r->rs[14] ? 64u : 0u);
+    g_diag_rec[i] = q;
+    atomic_store_explicit(&g_diag_n, i + 1, memory_order_relaxed);
+}
+
+typedef struct {
+    d3ddev *d;
+    float v0;      // низ полосы в координатах заднего буфера (0 — низ кадра, 1 — верх, как в GL)
+    u32 rgb;       // доминирующий цвет полосы
+    int pct, w, h; // его доля в процентах и размер кадра
+} diag_strip_args;
+
+// Полоса заднего буфера: доминирующий цвет грубой сеткой 4 бита на канал (4096 ячеек), затем среднее по ней
+static void x_diag_strip(void *arg)
+{
+    diag_strip_args *a = arg;
+    d3d_rstate *r = &a->d->r;
+    d3dsurf *bb = a->d->backbuffer;
+    a->rgb = 0;
+    a->pct = 0;
+    a->w = bb ? (int)bb->w : 0;
+    a->h = bb ? (int)bb->h : 0;
+    if (!bb || !bb->w || !bb->h)
+        return;
+    u32 w = bb->w, h = bb->h, rows = 8;
+    int y0 = (int)(a->v0 * (float)h);
+    if (y0 < 0)
+        y0 = 0;
+    if ((u32)y0 + rows > h)
+        y0 = h > rows ? (int)(h - rows) : 0;
+    u8 *px = malloc((size_t)w * rows * 4);
+    if (!px)
+        return;
+    if (!r->blit_fbo)
+        glGenFramebuffers(1, &r->blit_fbo);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, r->blit_fbo);
+    d3d8_fbo_attach(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, bb);
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glPixelStorei(GL_PACK_ROW_LENGTH, 0);
+    glReadPixels(0, y0, (GLsizei)w, (GLsizei)rows, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    glBindFramebuffer(GL_FRAMEBUFFER, r->fbo);
+    static u16 cnt[4096];
+    static u32 sum[4096][3];
+    memset(cnt, 0, sizeof cnt);
+    memset(sum, 0, sizeof sum);
+    u32 n = w * rows;
+    for (u32 i = 0; i < n; i++) {
+        const u8 *p = px + 4u * i;
+        u32 c = (((u32)p[0] >> 4) << 8) | (((u32)p[1] >> 4) << 4) | ((u32)p[2] >> 4);
+        if (!cnt[c]) {
+            sum[c][0] = sum[c][1] = sum[c][2] = 0;
+        }
+        cnt[c]++;
+        sum[c][0] += p[0];
+        sum[c][1] += p[1];
+        sum[c][2] += p[2];
+    }
+    int best = 0;
+    for (int c = 1; c < 4096; c++)
+        if (cnt[c] > cnt[best])
+            best = c;
+    if (cnt[best]) {
+        a->rgb = ((sum[best][0] / cnt[best]) << 16) | ((sum[best][1] / cnt[best]) << 8) | (sum[best][2] / cnt[best]);
+        a->pct = (int)((u64)cnt[best] * 100u / (n ? n : 1u));
+    }
+    free(px);
+}
+
+static void diag_text(int w, int h, const diag_strip_args *sa, const diag_strip_args *sb)
+{
+    char line[12][192];
+    int nl = 0;
+    u32 clr = atomic_load_explicit(&g_diag_clear, memory_order_relaxed);
+    u32 fogc = g_diag_n ? g_diag_rec[0].fogc : 0;
+    snprintf(line[nl++], sizeof line[0], "clear=%08X fog=%08X", clr, fogc);
+    snprintf(line[nl++], sizeof line[0], "top=%d%%:%02X%02X%02X mid=%d%%:%02X%02X%02X", sa->pct, (sa->rgb >> 16) & 0xFF,
+             (sa->rgb >> 8) & 0xFF, sa->rgb & 0xFF, sb->pct, (sb->rgb >> 16) & 0xFF, (sb->rgb >> 8) & 0xFF,
+             sb->rgb & 0xFF);
+    int nd = atomic_load_explicit(&g_diag_n, memory_order_relaxed);
+    for (int i = 0; i < nd && nl < 12; i++) {
+        const diag_rec *q = &g_diag_rec[i];
+        snprintf(line[nl++], sizeof line[0], "d%d st%u tex=%u/%u gen=%u/%u tci=%X ttf=%u/%u pj=%X tf=%08X", i,
+                 (unsigned)q->nstages, q->tex & 3u, (q->tex >> 2) & 3u, q->gen & 3u, (q->gen >> 2) & 3u,
+                 (unsigned)q->tci, q->ttf & 3u, (q->ttf >> 2) & 3u, (unsigned)q->proj, q->tf);
+        snprintf(line[nl++], sizeof line[0], "   fm%u fog=%u ab=%u lit=%u z=%u/%u", q->flags & 3u,
+                 (q->flags >> 2) & 1u, (q->flags >> 3) & 1u, (q->flags >> 4) & 1u, (q->flags >> 5) & 1u,
+                 (q->flags >> 6) & 1u);
+    }
+    float fh = (float)h * 0.026f;
+    if (fh < 11.0f)
+        fh = 11.0f;
+    if (fh > 40.0f)
+        fh = 40.0f;
+    float step = fh * 1.2f, pad = fh * 0.35f, x = fh * 0.5f, y = fh * 0.5f, bw = 0.0f;
+    for (int i = 0; i < nl; i++) {
+        float tw = ov_text_width(fh, line[i]);
+        if (tw > bw)
+            bw = tw;
+    }
+    ov_rect(x - pad, y - pad, bw + 2.0f * pad, (float)nl * step + 2.0f * pad, OV_RGBA(0, 0, 0, 190));
+    for (int i = 0; i < nl; i++)
+        ov_text(x, y + (float)i * step, fh, OV_RGBA(235, 240, 220, 255), line[i]);
+    (void)w;
+}
+
 // Режим 4:3-pillarbox для страниц меню (выключен по умолчанию: у страниц книги Shrek 2 есть собственные
 // кинематографические чёрные полосы 12.5% сверху и снизу; включается в Quick Menu или Snx.ini)
 static _Atomic int g_menu_aspect;
@@ -2886,6 +3052,7 @@ static void x_post_present(void *arg)
     r->gl_dirty = GLD_ALL;
     g_cur_prog = 0;
     r->draws = 0;
+    g_diag_n = 0;  // диагностика: следующий кадр пишется с чистого листа
     r->frame++;
     if (r->frame < 5 || r->frame % 300 == 0) {
         GLenum err = glGetError();
@@ -3028,11 +3195,22 @@ void d3d8_present(d3ddev *d)
         d->gamma_dirty = 0;
     }
     cs_async(x_present_pass, &pa, sizeof pa);
+    // Диагностика кадра («Настройки» → «Диагностика кадра»): две полосы заднего буфера читаем на Core 2 до гаммы
+    // Present, текст показываем в слое порта ниже — по скриншоту видно, откуда цвет: Clear, туман, TextureFactor
+    // или стадии текстуры (d0 — первая отрисовка кадра, обычно небо).
+    int diag_on = d3d8_diag() && w > 0 && h > 0;
+    diag_strip_args dsa = {d, 0.86f, 0, 0, 0, 0}, dsb = {d, 0.68f, 0, 0, 0, 0};
+    if (diag_on) {
+        cs_sync(x_diag_strip, &dsa);
+        cs_sync(x_diag_strip, &dsb);
+    }
     // Слой интерфейса порта (значки Switch, легенда меню, Quick Menu) — прямо в окно поверх пост-прохода:
     // квадратные пиксели 1:1 даже в режиме 4:3 и без искажения гаммой игры
     if (w > 0 && h > 0) {
         ov_begin();
         game_menu_draw_overlay(w, h, fdx, fdy, fdw, fdh);
+        if (diag_on)
+            diag_text(w, h, &dsa, &dsb);
         ov_flush(0, w, h);
     }
     // счётчик на экране: кадров за последние полсекунды
