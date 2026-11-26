@@ -43,6 +43,9 @@ class Settings(private val ctx: Context) {
     var diag: Boolean  // диагностика кадра поверх картинки (цвет заливки, туман, стадии) — при разборе картинки
         get() = p.getBoolean("diag", false)
         set(v) { p.edit().putBoolean("diag", v).commit() }
+    var fog: Boolean  // туман игры: по умолчанию выключен — у игры он накрывает небо и красит его ровным цветом
+        get() = p.getBoolean("fog", false)
+        set(v) { p.edit().putBoolean("fog", v).commit() }
     var sustained: Boolean  // стабильная производительность: ниже пик, зато без троттлинга (если телефон умеет)
         get() = p.getBoolean("sustained", false)
         set(v) { p.edit().putBoolean("sustained", v).commit() }
@@ -115,6 +118,7 @@ class Settings(private val ctx: Context) {
         if (tex16) env("SNX_TEX16", "1")
         env("SNX_SHOW_FPS", if (showFps) "1" else "0")
         env("SNX_DIAG", if (diag) "1" else "0")
+        env("SNX_FOG", if (fog) "1" else "0")
         env("SNX_FILE_CACHE_MB", fileCacheMb.toString())
         env("SNX_LOOK_SENS", "%.2f".format(java.util.Locale.ROOT, lookSensitivity))  // и камера правым стиком
         env("SNX_PAD_CAMERA", if (padCamera == 1) "joystick" else "mouse")

@@ -231,6 +231,12 @@ class GameActivity : SDLActivity(), InputManager.InputDeviceListener, DisplayMan
             settings.diag = it
             try { SnxNative.diag(it) } catch (e: UnsatisfiedLinkError) { }
         })
+        // туман игры: у неё диапазон тумана 5000..50000, и он накрывает только небо, крася его ровным цветом
+        // тумана вместо текстуры; выключен по умолчанию — небо тогда как в оригинале
+        c.addView(Ui.switchRow(this, L.t("Туман как в игре", "Game fog"), L.t("Выкл: небо как в оригинале (туман у игры накрывает только его)", "Off: the sky matches the original (the game's fog covers only it)"), settings.fog) {
+            settings.fog = it
+            try { SnxNative.fog(it) } catch (e: UnsatisfiedLinkError) { }
+        })
         // «Проверка неба»: нажать, стоя там, где небо видно — порт покажет варианты отрисовки по кругу (номер и
         // название варианта — в углу экрана) и запишет замеры в журнал (лаунчер → «Журнал» / snx.log)
         c.addView(Ui.button(this, L.t("Проверка неба (в журнал)", "Sky check (to the log)")) {

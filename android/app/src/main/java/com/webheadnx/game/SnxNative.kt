@@ -40,6 +40,8 @@ object SnxNative {
     @JvmStatic external fun mouse(x: Float, y: Float, down: Int)
     // диагностика кадра поверх картинки: заливка, туман, TextureFactor и первые отрисовки — для отладки цвета
     @JvmStatic external fun diag(on: Boolean)
+    // туман игры (по умолчанию выключен: он накрывает небо и красит его ровным цветом тумана)
+    @JvmStatic external fun fog(on: Boolean)
     // «Проверка неба»: крутит отладочные варианты отрисовки и пишет замеры в лог (разбор цвета неба)
     @JvmStatic external fun skyTest()
     // частота экрана и ограничение FPS: равны — кадры отмеряет vsync (platform/window.c plat_set_display)

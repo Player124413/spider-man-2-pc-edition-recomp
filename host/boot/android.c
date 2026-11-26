@@ -93,6 +93,14 @@ JNIEXPORT void JNICALL JNI_FN(skyTest)(JNIEnv *env, jclass cls)
     d3d8_sky_test(3);
 }
 
+// Туман игры (D3DRS_FOGENABLE): по умолчанию выключен — он красит небо ровным цветом тумана
+JNIEXPORT void JNICALL JNI_FN(fog)(JNIEnv *env, jclass cls, jboolean on)
+{
+    (void)env;
+    (void)cls;
+    d3d8_set_fog(on ? 1 : 0);
+}
+
 // Частота экрана (режим, выбранный GameActivity под ограничение FPS, или смена частоты системой) и ограничение
 JNIEXPORT void JNICALL JNI_FN(display)(JNIEnv *env, jclass cls, jfloat hz, jint fps_cap)
 {

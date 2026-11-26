@@ -156,6 +156,31 @@ static const char *diag_variant_name(int v)
     return v >= 0 && v < DIAG_VARIANTS ? names[v] : "?";
 }
 
+// Туман (D3DRS_FOGENABLE). Выключен по умолчанию: у игры диапазон тумана 5000..50000, то есть туман накрывает
+// только небо — и небо становится ровным цветом тумана вместо своей текстуры (в журнале это видно как
+// «тепло=NN%» и ровные клетки сетки). С выключенным туманом небо ровно такое же, как в оригинале (сиреневое),
+// а вся остальная геометрия ближе 5000 единиц всё равно не туманилась. Включается «Настройки» → «Туман как в
+// игре» или SNX_FOG=1.
+static _Atomic int g_fog = -1;   // -1 — ещё не читали SNX_FOG
+static _Atomic int g_fog_dirty;  // 1 — ключи программ собрать заново (туман входит в ключ)
+
+void d3d8_set_fog(int on)
+{
+    atomic_store_explicit(&g_fog, on != 0, memory_order_relaxed);
+    atomic_store_explicit(&g_fog_dirty, 1, memory_order_relaxed);
+}
+
+int d3d8_fog_on(void)
+{
+    int v = atomic_load_explicit(&g_fog, memory_order_relaxed);
+    if (v < 0) {
+        const char *e = getenv("SNX_FOG");
+        v = e && *e && *e != '0';
+        atomic_store_explicit(&g_fog, v, memory_order_relaxed);
+    }
+    return v;
+}
+
 // «Проверка неба» (шестерёнка → «Настройки»): показать варианты по кругу, имя — в углу экрана и в журнале.
 // Пока открыто меню игры, показ стоит на месте: в меню неба не видно, а состояния там менять незачем.
 void d3d8_sky_test(int cycles)
@@ -180,18 +205,24 @@ static void fmt_name(char *out, size_t cap, u32 f)
         snprintf(out, cap, "%u", f);
 }
 
-static void diag_sweep_note(void)
+static void diag_sweep_note(int cycle)
 {
     static int done;
     if (done)
         return;
     done = 1;
-    fprintf(stderr,
-            "[diag] картинка: раз в %d кадров порт на %d кадров включает варианты v1 туман розовый, v2 без texgen, "
-            "v3 TextureFactor белый, v4 стадия 0 = только текстура (v0 — как есть) и пишет «[diag] pic»: полосы самой "
-            "картинки, доля персиковых пикселей и сетку 12x8. «Проверка неба» в шестерёнке показывает все %d "
-            "вариантов по кругу (включая v5 без гаммы и v6 без тумана) с именем в углу экрана\n",
-            DIAG_CYCLE, DIAG_BLOCK * 4, DIAG_VARIANTS);
+    if (cycle)
+        fprintf(stderr,
+                "[diag] картинка (SNX_DIAG_AUTO=1): раз в %d кадров порт на %d кадров включает варианты v1 туман "
+                "розовый, v2 без texgen, v3 TextureFactor белый, v4 стадия 0 = только текстура (v0 — как есть) и "
+                "пишет «[diag] pic»: полосы самой картинки, доля персиковых пикселей и сетку 12x8\n",
+                DIAG_CYCLE, DIAG_BLOCK * 4);
+    else
+        fprintf(stderr,
+                "[diag] картинка: раз в %d кадров «[diag] pic» — полосы самой картинки, доля персиковых пикселей и "
+                "сетка 12x8 (перебор вариантов в фоне выключен, SNX_DIAG_AUTO=1 его включает). «Проверка неба» в "
+                "шестерёнке показывает все %d вариантов по кругу с именем в углу экрана\n",
+                DIAG_CYCLE, DIAG_VARIANTS);
 }
 
 typedef struct {
@@ -288,7 +319,7 @@ static void make_key(const d3d_rstate *d, const vdecl *decl, ffkey *k)
     }
     if (rs[28] && g_diag_variant == 6)  // вариант самодиагностики: туман выключен целиком (видно, что им закрашено)
         k->fog = FOG_NONE;
-    else if (rs[28]) {  // FOGENABLE
+    else if (rs[28] && d3d8_fog_on()) {  // FOGENABLE (и туман не выключен настройкой порта — см. d3d8_fog_on)
         u32 table = rs[35], vert = rs[140];
         if (table) {
             k->fog = FOG_PIXEL;
@@ -3490,12 +3521,22 @@ void d3d8_present(d3ddev *d)
     // легко заметить, на каком варианте оно такое же, как в оригинале. В журнал идёт «[diag] pic»: clear, туман,
     // гамма-LUT игры, границы картинки без чёрных полос, цвет четырёх полос картинки, доля «тёплых» (персиковых)
     // пикселей, состояние первых отрисовок и грубая сетка 12x8 — картинка кадра текстом.
-    static int diag_log_on = -1;
+    static int diag_log_on = -1, diag_cycle = 0;
     if (diag_log_on < 0) {
+        // SNX_DIAG_AUTO: не задано — только замеры (картинка не меняется), 1 — ещё и фоновый перебор вариантов,
+        // 0 — выключить совсем. Перебор в фоне искажает картинку на треть времени, поэтому по умолчанию выключен:
+        // варианты показывает «Проверка неба» в шестерёнке, когда это нужно.
         const char *e = getenv("SNX_DIAG_AUTO");
         diag_log_on = !(e && *e == '0');
+        diag_cycle = e && *e == '1';
         if (diag_log_on)
-            diag_sweep_note();
+            diag_sweep_note(diag_cycle);
+    }
+    // Туман переключили на ходу («Туман как в игре»): туман входит в ключ программы — просим собрать ключи заново
+    if (atomic_exchange_explicit(&g_fog_dirty, 0, memory_order_relaxed)) {
+        d3ddev *gd = d3d8_dev();
+        if (gd)
+            cs_cmd_push(x_diag_invalidate, &gd, sizeof gd);
     }
     // Показ «Проверка неба»: по SKY_SHOW_FRAMES кадров на вариант. В меню игры показ стоит на месте — там неба не
     // видно, а состояния менять незачем (кнопку как раз нажимают из меню).
@@ -3519,6 +3560,8 @@ void d3d8_present(d3ddev *d)
     int phase = (int)(d->frame % DIAG_CYCLE), want = 0, sample_now = 0;
     if (show_on)
         want = g_sky_step;
+    else if (diag_meas && !diag_cycle)
+        sample_now = phase == DIAG_NORMAL / 2;  // вариант не перебираем — только замер раз в цикл
     else if (diag_meas) {
         // 0..DIAG_NORMAL-1 — обычная отрисовка, дальше по DIAG_BLOCK кадров на вариант v1..v4
         int p = phase >= DIAG_NORMAL ? phase - DIAG_NORMAL : -1;
@@ -3594,11 +3637,11 @@ void d3d8_present(d3ddev *d)
                 fmt_name(f1, sizeof f1, q->tfm[1]);
                 off += (size_t)snprintf(buf + off, sizeof buf - off,
                                         "\n[diag] d%d{st%u tex%u:%ux%u/%s,%ux%u/%s tci%X gen%u/%u ttf%u/%u pj%X tf=%08X "
-                                        "op%u/%u/%u fm%u ab%u lit%u",
+                                        "op%u/%u/%u fm%u fg=%08X ab%u lit%u",
                                         i, (unsigned)q->nstages, q->tex & 3u, q->tw[0], q->th[0], f0, q->tw[1], q->th[1],
                                         f1, (unsigned)q->tci, q->gen & 3u, (q->gen >> 2) & 3u, q->ttf & 3u,
                                         (q->ttf >> 2) & 3u, (unsigned)q->proj, q->tf, q->cop, q->ca1, q->ca2,
-                                        q->flags & 3u, (q->flags >> 3) & 1u, (q->flags >> 4) & 1u);
+                                        q->flags & 3u, q->fogc, (q->flags >> 3) & 1u, (q->flags >> 4) & 1u);
                 if (q->ttf & 3u)  // матрица текстур стадии 0: строки u и смещения
                     off += (size_t)snprintf(buf + off, sizeof buf - off, " tm=%.3g,%.3g,%.3g,%.3g/%.3g,%.3g,%.3g,%.3g",
                                             q->tm[0], q->tm[1], q->tm[2], q->tm[3], q->tm[4], q->tm[5], q->tm[6],
