@@ -157,7 +157,7 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
                 // центр стика камеры под пальцем и его отклонение — видно, с какой силой идёт поворот
                 val r = lookRadius() * 0.6f
                 WebIcons.drawStick(canvas, lookCX, lookCY, r, lookCX + lookX * r * 0.6f, lookCY + lookY * r * 0.6f,
-                    true, alpha(settings.opacity))
+                    true, settings.opacity.coerceIn(0.15f, 1f))
             }
             drawGear(canvas)
             if (mouseX >= 0f && menuActive()) drawMouseCursor(canvas)
