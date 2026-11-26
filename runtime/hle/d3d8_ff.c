@@ -136,9 +136,18 @@ static _Atomic u32 g_diag_clear;  // последний цвет заливки 
 // 1 — туман розовый, 2 — без texgen, 3 — TextureFactor белый, 4 — стадия 0 только текстура). По строке «[diag]»
 // в логе видно, какой вариант меняет цвет неба, — причина находится по одному прогону. Варианты, меняющие только
 // uniform'ы (1 и 3), не требуют новых программ; 2 и 4 собирают по одной программе на материал.
-#define DIAG_ROT 40
+#define DIAG_ROT 30          // кадров на один отладочный вариант в «Проверке неба»
 #define DIAG_VARIANTS 5
+#define DIAG_LOG_EVERY 600   // кадров между строками «[diag] pic» (раз в ~10 с игры)
 static _Atomic int g_diag_variant;
+static _Atomic int g_diag_cycles;   // сколько кругов «Проверки неба» ещё осталось
+
+void d3d8_sky_test(int cycles)
+{
+    atomic_store(&g_diag_cycles, cycles > 0 ? cycles : 0);
+    atomic_store(&g_diag_variant, 0);
+    fprintf(stderr, "[diag] sky test: %d cycle(s) — варианты пойдут по кругу\n", cycles);
+}
 
 static void diag_sweep_note(void)
 {
@@ -147,8 +156,10 @@ static void diag_sweep_note(void)
         return;
     done = 1;
     fprintf(stderr,
-            "[diag] sweep: v0 как есть, v1 туман розовый, v2 без texgen, v3 TextureFactor белый, "
-            "v4 стадия 0 = только текстура; каждые %d кадров строка [diag] с цветом полос кадра\n", DIAG_ROT);
+            "[diag] картинка: «[diag] pic» раз в ~10 с игры — полосы кадра и первые отрисовки; «Проверка неба» "
+            "в шестерёнке крутит варианты v0 как есть, v1 туман розовый, v2 без texgen, v3 TextureFactor белый, "
+            "v4 стадия 0 = только текстура (по %d кадров на вариант)\n",
+            DIAG_ROT);
 }
 
 typedef struct {
@@ -2607,6 +2618,8 @@ int d3d8_diag(void)
 
 typedef struct {
     u32 nstages, tex, tci, gen, ttf, proj, tf, fogc, flags;
+    u32 tw[2], th[2], tfm[2];  // текстуры стадий 0 и 1: размер и формат D3D
+    u8 cop, ca1, ca2;          // операция стадии 0 (D3DTOP и аргументы)
 } diag_rec;
 
 static diag_rec g_diag_rec[DIAG_DRAWS];  // пишет поток рендера, читает поток гостя (только для показа)
@@ -2614,8 +2627,6 @@ static _Atomic int g_diag_n;             // сколько отрисовок к
 
 static void diag_record(const d3d_rstate *r, const ffkey *k)
 {
-    if (!d3d8_diag())
-        return;
     int i = atomic_load_explicit(&g_diag_n, memory_order_relaxed);
     if (i >= DIAG_DRAWS)
         return;
@@ -2631,6 +2642,17 @@ static void diag_record(const d3d_rstate *r, const ffkey *k)
         if (k->st[s].ttf_proj)
             q.proj |= 1u << s;
     }
+    for (int s = 0; s < 2 && s < k->nstages; s++) {
+        const d3dtex *t = r->tex[s];
+        if (t) {
+            q.tw[s] = t->w;
+            q.th[s] = t->h;
+            q.tfm[s] = t->fmt;
+        }
+    }
+    q.cop = k->st[0].cop;
+    q.ca1 = k->st[0].ca1;
+    q.ca2 = k->st[0].ca2;
     q.tf = r->rs[60];   // D3DRS_TEXTUREFACTOR
     q.fogc = r->rs[34]; // D3DRS_FOGCOLOR
     q.flags = (u32)(k->fog & 3) | (r->rs[28] ? 4u : 0u) | (r->rs[27] ? 8u : 0u) | (k->lighting ? 16u : 0u) |
@@ -3236,36 +3258,55 @@ void d3d8_present(d3ddev *d)
         d->gamma_dirty = 0;
     }
     cs_async(x_present_pass, &pa, sizeof pa);
-    // Самодиагностика картинки: раз в DIAG_ROT кадров печатаем в лог доминирующий цвет двух полос кадра и
-    // переключаем отладочный вариант (см. diag_sweep_note). Один прогон показывает, что именно красит небо.
-    static int sweep_on = -1;
-    if (sweep_on < 0) {
+    // ------------------------------------------------------------------ диагностика картинки в лог
+    // Раз в DIAG_LOG_EVERY кадров (только в игре) — строка «[diag] pic …»: доминирующий цвет двух полос кадра до
+    // гаммы, цвет заливки, цвет тумана и состояние первых отрисовок кадра (небо в игре рисуется первой). Ничего
+    // не меняет в отрисовке — можно просто играть и прислать лог.
+    static int diag_log_on = -1;
+    if (diag_log_on < 0) {
         const char *e = getenv("SNX_DIAG_AUTO");
-        sweep_on = !(e && *e == '0');
-        if (sweep_on)
+        diag_log_on = !(e && *e == '0');
+        if (diag_log_on)
             diag_sweep_note();
     }
-    // только в игре: в меню и в роликах кадров мало (1–6 отрисовок), а неба там не видно
-    // один круг вариантов при старте игры (чтобы не мигало всё время); с включённым «Диагностика кадра» — по кругу
-    static int sweep_state;  // 0 — ждём игру, 1 — идём по вариантам, 2 — готово
-    if (sweep_on && sweep_state == 0 && d->draws >= 20)
-        sweep_state = 1;
-    if (sweep_on && sweep_state == 1 && w > 0 && h > 0 && d->draws >= 20 && d->frame % DIAG_ROT == DIAG_ROT - 1) {
+    int diag_meas = diag_log_on && w > 0 && h > 0 && d->draws >= 8;
+    int want_pic = diag_meas && d->frame % DIAG_LOG_EVERY == DIAG_LOG_EVERY - 1;
+    // Проверка неба по кнопке («Проверка неба» в шестерёнке): один-два круга отладочных вариантов на месте,
+    // где небо видно. Крутится, пока g_diag_cycles > 0, потом картинка обычная.
+    int sweep_run = diag_meas && atomic_load(&g_diag_cycles) > 0 && d->frame % DIAG_ROT == DIAG_ROT - 1;
+    if (want_pic || sweep_run) {
         diag_strip_args s1 = {d, 0.86f, 0, 0, 0, 0}, s2 = {d, 0.68f, 0, 0, 0, 0};
         cs_sync(x_diag_strip, &s1);
         cs_sync(x_diag_strip, &s2);
-        fprintf(stderr,
-                "[diag] v=%d top=%02X%02X%02X %d%% mid=%02X%02X%02X %d%% clear=%08X fog=%08X frame=%d draws=%u\n",
-                (int)g_diag_variant, (s1.rgb >> 16) & 0xFF, (s1.rgb >> 8) & 0xFF, s1.rgb & 0xFF, s1.pct,
+        int v = (int)g_diag_variant;
+        fprintf(stderr, "[diag] %s v=%d top=%02X%02X%02X %d%% mid=%02X%02X%02X %d%% clear=%08X fog=%08X frame=%d draws=%u\n",
+                sweep_run ? "sweep" : "pic", v, (s1.rgb >> 16) & 0xFF, (s1.rgb >> 8) & 0xFF, s1.rgb & 0xFF, s1.pct,
                 (s2.rgb >> 16) & 0xFF, (s2.rgb >> 8) & 0xFF, s2.rgb & 0xFF, s2.pct,
                 atomic_load_explicit(&g_diag_clear, memory_order_relaxed), d->r.rs[34], d->frame, d->draws);
-        int nv = (int)g_diag_variant + 1;
-        if (nv >= DIAG_VARIANTS) {  // круг закончен: обычная отрисовка (и стоп, если окно диагностики не включено)
+        // состояние первых отрисовок кадра: по нему видно, чем нарисовано небо
+        int nd = atomic_load_explicit(&g_diag_n, memory_order_relaxed);
+        char buf[768];
+        size_t off = 0;
+        for (int i = 0; i < nd && off < sizeof buf - 200; i++) {
+            const diag_rec *q = &g_diag_rec[i];
+            off += (size_t)snprintf(buf + off, sizeof buf - off,
+                                    "\n[diag] d%d{st%u tex%u:%ux%u/f%u tci%X gen%u/%u ttf%u/%u tf=%08X "
+                                    "op%u/%u/%u fm%u ab%u lit%u}",
+                                    i, (unsigned)q->nstages, q->tex & 3u, q->tw[0], q->th[0], q->tfm[0],
+                                    (unsigned)q->tci, q->gen & 3u, (q->gen >> 2) & 3u, q->ttf & 3u, (q->ttf >> 2) & 3u,
+                                    q->tf, q->cop, q->ca1, q->ca2, q->flags & 3u, (q->flags >> 3) & 1u,
+                                    (q->flags >> 4) & 1u);
+        }
+        fprintf(stderr, "%s\n", buf);
+    }
+    if (sweep_run) {
+        int v = (int)g_diag_variant, nv = v + 1;
+        if (nv >= DIAG_VARIANTS) {
             nv = 0;
-            if (!d3d8_diag()) {
-                sweep_state = 2;
+            int left = atomic_load(&g_diag_cycles) - 1;
+            atomic_store(&g_diag_cycles, left);
+            if (left <= 0)
                 fprintf(stderr, "[diag] sweep done\n");
-            }
         }
         atomic_store(&g_diag_variant, nv);
         cs_cmd_push(x_diag_invalidate, &d, sizeof d);  // команды идут по порядку: следующий кадр соберёт ключи заново

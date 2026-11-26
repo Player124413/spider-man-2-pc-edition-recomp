@@ -84,6 +84,14 @@ JNIEXPORT void JNICALL JNI_FN(diag)(JNIEnv *env, jclass cls, jboolean on)
     d3d8_set_diag(on ? 1 : 0);
 }
 
+// «Проверка неба»: два круга отладочных вариантов отрисовки и замеры в лог (небо, туман, texgen, TextureFactor)
+JNIEXPORT void JNICALL JNI_FN(skyTest)(JNIEnv *env, jclass cls)
+{
+    (void)env;
+    (void)cls;
+    d3d8_sky_test(2);
+}
+
 // Частота экрана (режим, выбранный GameActivity под ограничение FPS, или смена частоты системой) и ограничение
 JNIEXPORT void JNICALL JNI_FN(display)(JNIEnv *env, jclass cls, jfloat hz, jint fps_cap)
 {
