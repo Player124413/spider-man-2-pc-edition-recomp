@@ -208,8 +208,8 @@ class GameActivity : SDLActivity(), InputManager.InputDeviceListener, DisplayMan
             .show()
     }
 
-    // Настройки на ходу. Чувствительность камеры TouchControlsView читает при каждом движении пальца,
-    // поэтому ползунок действует сразу, без перезапуска игры.
+    // Настройки на ходу. Чувствительность и скорость камеры TouchControlsView читает при каждом движении пальца
+    // (камера пальцем — смещение мыши, как в порте Shrek 2), поэтому ползунки действуют сразу, без перезапуска.
     private fun settingsMenu() {
         val c = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val pad = Ui.dp(this, 16f)
@@ -227,8 +227,9 @@ class GameActivity : SDLActivity(), InputManager.InputDeviceListener, DisplayMan
             settings.camSpeed = 30f + it * 10f
             camApply()
         })
-        // Мёртвая зона камеры: если камера «доезжает» в обратную сторону, когда палец возвращается через центр, — больше
-        c.addView(Ui.seekRow(this, L.t("Мёртвая зона камеры", "Camera dead zone"), 30,
+        // Мёртвая зона правого стика геймпада. У пальца её нет и быть не должно: палец тянет камеру напрямую,
+        // сколько провёл — на столько и повернулось (как мышь в ПК-версии и как в порте Shrek 2).
+        c.addView(Ui.seekRow(this, L.t("Мёртвая зона стика", "Stick dead zone"), 30,
             ((settings.camDead - 0.05f) * 100f).toInt().coerceIn(0, 30),
             { "%.2f".format(0.05f + it / 100f) }) {
             settings.camDead = 0.05f + it / 100f

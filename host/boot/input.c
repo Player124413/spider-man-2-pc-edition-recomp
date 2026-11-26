@@ -635,8 +635,8 @@ void input_init(const char *user_dir)
         input_set_look_sens((float)atof(ls));
     fprintf(stderr, "[input] right stick camera: %s, speed %.0f, sensitivity %.2f\n", g_cam_mouse ? "mouse" : "joystick",
             (double)g_cam_speed, (double)atomic_load_explicit(&g_look_sens, memory_order_relaxed));
-    // камера пальцем — плавающий правый стик на экране: та же ось, что у геймпада (в игре мыши нет)
-    fprintf(stderr, "[input] finger camera: floating right stick -> %s\n", g_cam_mouse ? "mouse deltas" : "joystick axis");
+    // камера пальцем — смещения мыши (как в ПК-версии и в порте Shrek 2): палец тянет камеру напрямую
+    fprintf(stderr, "[input] finger camera: drag -> mouse deltas\n");
     // камера из лаунчера: мёртвая зона, скорость поворота и зеркало осей (на ходу их правит шестерёнка)
     input_set_camera((float)atof(getenv("SNX_LOOK_SENS") ? getenv("SNX_LOOK_SENS") : "0"),
                      getenv("SNX_CAM_DEAD") ? (float)atof(getenv("SNX_CAM_DEAD")) : -1.0f,
@@ -1322,6 +1322,7 @@ static int log_touch(void);  // ниже: в Android — всегда, на ПК
 static pthread_mutex_t g_touch_lock = PTHREAD_MUTEX_INITIALIZER;
 static u32 g_touch_buttons, g_touch_applied;
 static float g_touch_axis[4];
+static float g_look_x, g_look_y;  // смещение пальца по экрану за кадр (в отсчётах мыши), под g_touch_lock
 static struct {
     short vk;
     char down;
@@ -1360,6 +1361,16 @@ void touch_pad(uint32_t buttons, float lx, float ly, float rx, float ry)
     g_touch_axis[1] = ly;
     g_touch_axis[2] = rx;
     g_touch_axis[3] = ry;
+    pthread_mutex_unlock(&g_touch_lock);
+}
+
+// Камера пальцем: палец двигает камеру ровно на столько, на сколько сдвинулся сам — тем же путём, что и мышь
+// ПК в оригинале (aMouseX/aMouseY DirectInput). UI-поток только копит смещение, в мышь его переводит input_tick.
+void touch_look(float dx, float dy)
+{
+    pthread_mutex_lock(&g_touch_lock);
+    g_look_x += dx;
+    g_look_y += dy;
     pthread_mutex_unlock(&g_touch_lock);
 }
 
@@ -1571,6 +1582,7 @@ static void diag_tick(void)
 static void touch_tick(void)
 {
     u32 buttons;
+    float look_x, look_y;
     int nkeys;
     short vks[32];
     char downs[32];
@@ -1578,6 +1590,9 @@ static void touch_tick(void)
     pthread_mutex_lock(&g_touch_lock);
     buttons = g_touch_buttons;
     memcpy(g_touch_ax, g_touch_axis, sizeof g_touch_ax);
+    look_x = g_look_x;
+    look_y = g_look_y;
+    g_look_x = g_look_y = 0.0f;
     nkeys = g_ntouch_keys;
     for (int i = 0; i < nkeys; i++) {
         vks[i] = g_touch_keys[i].vk;
@@ -1597,8 +1612,20 @@ static void touch_tick(void)
             pad_button(b, (buttons >> b) & 1);
     g_touch_applied = buttons;
     for (int i = 0; i < nkeys; i++)
-        key((u32)vks[i], downs[i]);    // Камера пальцем сюда не приходит: на экране это плавающий правый стик (TouchControlsView -> SnxNative.pad),
-    // и он идёт в ту же ось, что геймпад. Касание в меню — щелчок курсором, мышь в игре не участвует совсем.
+        key((u32)vks[i], downs[i]);
+    // Камера пальцем. Палец двигает камеру на столько, на сколько сдвинулся сам: смещение копится здесь и уходит
+    // в DirectInput-мышь, как в оригинальной ПК-версии (и как в порте Shrek 2) — без стика, мёртвой зоны и
+    // «скорости от отклонения». Пока открыто меню игры, касание по свободному месту — щелчок курсором, камеры там нет.
+    if (!g_input_frozen && (look_x != 0.0f || look_y != 0.0f)) {
+        static float mx, my;  // дробные остатки: за одно событие палец сдвигается меньше чем на отсчёт мыши
+        mx += g_invert_x ? -look_x : look_x;
+        my += g_invert_y ? -look_y : look_y;
+        int dx = (int)mx, dy = (int)my;
+        mx -= (float)dx;
+        my -= (float)dy;
+        if (dx || dy)
+            dinput8_mouse_move(dx, dy, 0);
+    }
 }
 
 static float axis_of(int a)

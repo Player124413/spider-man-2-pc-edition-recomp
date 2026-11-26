@@ -55,6 +55,15 @@ typedef struct {
 
 static bink *g_bink[MAX_BINK];
 
+// Звук роликов, которые порт рисует сам (реализация ниже, перед BinkDoFrame)
+#ifdef SNX_HEADLESS
+static void movie_audio_pump(bink *b) { (void)b; }
+static void movie_audio_stop(bink *b) { (void)b; }
+#else
+static void movie_audio_pump(bink *b);
+static void movie_audio_stop(bink *b);
+#endif
+
 static bink *by_obj(u32 obj)
 {
     if (!obj)
@@ -89,6 +98,7 @@ static void bink_destroy(bink *b)
 {
     if (!b)
         return;
+    movie_audio_stop(b);  // ролик закрылся — очередь звука порта тоже
     for (int t = 0; t < 4; t++) {
         if (b->tracks[t])
             heap_free(heap_process(), b->tracks[t]);
@@ -615,6 +625,160 @@ void hle_binkw32__BinkGetTrackData_8(CPU *c)
     RET(2, bytes);
 }
 
+// ── Звук ролика, который порт рисует сам ─────────────────────────────────────────────────────────────
+// На ПК звук ролика играет сам Bink через DirectAudio, а игра (Engine) PCM роликов не забирает вовсе — в
+// журнале у таких роликов «movie closed: 0 audio frame(s) taken by the game». DirectSound в порте нет, поэтому
+// дорожку ролика декодирует сам порт (bink_audio.c) и отдаёт в очередь SDL: OpenAL занят звуком игры, а SDL
+// уже подключён хостом. Звук идёт за кадрами, которые игра уже прошла (BinkNextFrame), а не своим таймером:
+// на паузе, при медленном кадре и при перемотке он не разъезжается с картинкой.
+#ifndef SNX_HEADLESS
+#include <SDL.h>
+
+static SDL_AudioDeviceID g_mov_dev;
+static SDL_AudioStream *g_mov_stream;
+static bink_audio *g_mov_dec;
+static u32 g_mov_owner, g_mov_track, g_mov_next, g_mov_out_rate, g_mov_need;
+static int g_mov_failed;
+static float g_mov_gain = 1.0f;
+static s16 g_mov_pcm[0x12000];  // 147456 байт: больше самого большого аудиопакета Bink (145920)
+
+static void movie_audio_stop(bink *b);
+
+static void movie_audio_reset(void)
+{
+    if (g_mov_stream)
+        SDL_FreeAudioStream(g_mov_stream);
+    g_mov_stream = NULL;
+    bink_audio_free(g_mov_dec);
+    g_mov_dec = NULL;
+    g_mov_owner = 0;
+    if (g_mov_dev)
+        SDL_ClearQueuedAudio(g_mov_dev);
+}
+
+static int movie_audio_wanted(void)
+{
+    const char *e = getenv("SNX_MOVIE_SOUND");  // 0 — без звука роликов (для сравнения в журнале)
+    return !(e && *e == '0');
+}
+
+static int movie_audio_open(void)
+{
+    if (g_mov_dev)
+        return 1;
+    if (g_mov_failed)
+        return 0;
+    if (!movie_audio_wanted()) {
+        g_mov_failed = 1;
+        return 0;
+    }
+    if (!SDL_WasInit(SDL_INIT_AUDIO) && SDL_InitSubSystem(SDL_INIT_AUDIO) != 0) {
+        g_mov_failed = 1;
+        fprintf(stderr, "[bink] movie sound: SDL audio not available (%s)\n", SDL_GetError());
+        return 0;
+    }
+    SDL_AudioSpec want, have;
+    SDL_zero(want);
+    SDL_zero(have);
+    want.freq = 48000;
+    want.format = AUDIO_S16SYS;
+    want.channels = 2;
+    want.samples = 1024;
+    g_mov_dev = SDL_OpenAudioDevice(NULL, 0, &want, &have, SDL_AUDIO_ALLOW_FREQUENCY_CHANGE);
+    if (!g_mov_dev) {
+        g_mov_failed = 1;
+        fprintf(stderr, "[bink] movie sound: cannot open audio device (%s)\n", SDL_GetError());
+        return 0;
+    }
+    SDL_PauseAudioDevice(g_mov_dev, 0);
+    g_mov_out_rate = have.freq ? (u32)have.freq : (u32)want.freq;
+    g_mov_need = g_mov_out_rate * 4u / 3u;  // ~330 мс стерео 16 бит в очереди
+    const char *vol = getenv("SNX_MOVIE_VOL");  // громкость роликов, доля от исходной
+    if (vol && atof(vol) > 0.0)
+        g_mov_gain = (float)atof(vol) > 2.0f ? 2.0f : (float)atof(vol);
+    fprintf(stderr, "[bink] movie sound: SDL %u Hz stereo, %u ms queue, gain %.2f\n", g_mov_out_rate,
+            g_mov_need / (g_mov_out_rate / 250u), (double)g_mov_gain);
+    return 1;
+}
+
+static int movie_audio_begin(bink *b)
+{
+    if (!movie_audio_open())
+        return 0;
+    if (g_mov_owner == b->obj && g_mov_dec && g_mov_stream)
+        return 1;
+    movie_audio_reset();
+    u32 ch = (b->flags[0] & 0x2000) ? 2u : 1u;
+    g_mov_dec = bink_audio_new(b->rate[0], ch, (b->flags[0] & 0x1000) != 0, (int)(b->sig >> 24));
+    if (!g_mov_dec)
+        return 0;
+    g_mov_stream = SDL_NewAudioStream(AUDIO_S16SYS, (Uint8)ch, (int)b->rate[0], AUDIO_S16SYS, 2, (int)g_mov_out_rate);
+    if (!g_mov_stream) {
+        bink_audio_free(g_mov_dec);
+        g_mov_dec = NULL;
+        return 0;
+    }
+    g_mov_owner = b->obj;
+    g_mov_track = 0;
+    g_mov_next = 0;
+    fprintf(stderr, "[bink] movie sound: track 0 %u Hz x%u by the port -> SDL %u Hz x2\n", b->rate[0], ch,
+            g_mov_out_rate);
+    return 1;
+}
+
+// Держит очередь заполненной до g_mov_need, но не забегая вперёд кадров, которые игра уже прошла.
+static void movie_audio_pump(bink *b)
+{
+    if (!b || !b->movie || !b->ntracks)
+        return;
+    for (u32 t = 0; t < b->ntracks; t++)
+        if (b->audio_req[t])  // игру звук берёт — второй раз не играем
+            return;
+    if (!movie_audio_begin(b))
+        return;
+    if (g_mov_next > b->frame || b->frame - g_mov_next > 90u) {  // перемотка или конец ролика
+        bink_audio_reset(g_mov_dec);
+        SDL_ClearQueuedAudio(g_mov_dev);
+        g_mov_next = b->frame;
+    }
+    u32 queued = SDL_GetQueuedAudioSize(g_mov_dev);
+    while (queued < g_mov_need && g_mov_next <= b->frame && g_mov_next < b->frames) {
+        u32 n = 0;
+        const u8 *p = audio_packet(b, g_mov_next++, g_mov_track, &n);
+        if (!p || n < 5u)
+            continue;
+        u32 bytes = le32(p);
+        if (bytes > sizeof g_mov_pcm)
+            bytes = (u32)sizeof g_mov_pcm;
+        u32 got = bytes >= 2u ? bink_audio_decode(g_mov_dec, p + 4, n - 4u, g_mov_pcm, bytes / 2u) : 0;
+        if (!got)
+            continue;
+        if (g_mov_gain != 1.0f)
+            for (u32 i = 0; i < got; i++)
+                g_mov_pcm[i] = (s16)(g_mov_pcm[i] * g_mov_gain);
+        if (SDL_AudioStreamPut(g_mov_stream, g_mov_pcm, (int)(got * 2u)) != 0)
+            break;
+        int avail;
+        while ((avail = SDL_AudioStreamAvailable(g_mov_stream)) > 0) {
+            u8 out[4096];
+            int k = SDL_AudioStreamGet(g_mov_stream, out, avail > (int)sizeof out ? (int)sizeof out : avail);
+            if (k <= 0)
+                break;
+            if (SDL_QueueAudio(g_mov_dev, out, (Uint32)k) != 0)
+                break;
+        }
+        queued = SDL_GetQueuedAudioSize(g_mov_dev);
+    }
+}
+
+static void movie_audio_stop(bink *b)
+{
+    if (!b || !g_mov_dev || g_mov_owner != b->obj)
+        return;
+    movie_audio_reset();
+}
+#endif  // SNX_HEADLESS
+
 void hle_binkw32__BinkDoFrame_4(CPU *c)
 {
     HLE_ENTER("BinkDoFrame", 1);
@@ -636,6 +800,7 @@ void hle_binkw32__BinkNextFrame_4(CPU *c)
         wr32(g_mem, b->obj + 16, b->frame + 1);  // LastFrameNum
         b->frame = b->frame + 1 < b->frames ? b->frame + 1 : 0;  // как SDK: после последнего — первый
         sync_obj(b);
+        movie_audio_pump(b);  // кадр прошёл — очередь звука ролика пополняется только что пройденными кадрами
     }
     RET(1, 0);
 }
@@ -768,6 +933,7 @@ int bink_movie_overlay(const u8 **rgba, u32 *w, u32 *h)
     if (!m)
         return 0;
     u32 f = m->do_frame != ~0u ? m->do_frame : m->frame;
+    movie_audio_pump(m);  // игра зовёт только BinkDoFrame — звук ролика тоже должен идти
     video_decode_to(m, f);
     if (m->vid_frame == ~0u)
         return 0;
