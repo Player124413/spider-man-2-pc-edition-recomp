@@ -36,6 +36,7 @@ typedef struct {
     u32 video_flags;       // dword заголовка по смещению 36
     u32 frames, w, h, fps, fpsdiv, ntracks;
     u32 rate[4], flags[4], maxsize[4];
+    u32 audio_req[4];  // сколько раз игра забрала PCM дорожки (BinkGetTrackData): видно в журнале при закрытии
     u32 *offs;             // frames + 1 смещений
     u8 *key;               // ключевые кадры (бит 0 смещения)
     u32 frame;             // текущий, с 0
@@ -488,8 +489,13 @@ void hle_binkw32__BinkOpen_8(CPU *c)
     b->movie = from_file && b->w && b->h;
     b->menu_movie = b->movie && menu_movie;
     b->tick_ns = rt_ticks_ns();
-    if (b->movie)
-        fprintf(stderr, "[bink] movie %ux%u, %u frames\n", b->w, b->h, b->frames);
+    if (b->movie) {
+        fprintf(stderr, "[bink] movie %ux%u, %u frames, audio tracks: %u\n", b->w, b->h, b->frames, b->ntracks);
+        for (u32 t = 0; t < b->ntracks; t++)
+            fprintf(stderr, "[bink]   track %u: %u Hz, %s, %s, max %u bytes/packet\n", t, b->rate[t],
+                    (b->flags[t] & 0x2000) ? "stereo" : "mono", (b->flags[t] & 0x4000) ? "16 bit" : "8 bit",
+                    b->maxsize[t]);
+    }
     if (b->w > 0 && b->h > 0 && b->w <= MAX_BINK_DIM && b->h <= MAX_BINK_DIM) {
         b->vid = bink_video_new(b->sig, b->video_flags, b->w, b->h);
         if (!b->vid)
@@ -506,6 +512,12 @@ void hle_binkw32__BinkClose_4(CPU *c)
     for (int i = 0; i < MAX_BINK; i++) {
         bink *b = g_bink[i];
         if (b && b->obj == obj) {
+            if (b->movie) {  // видно, брала ли игра звук ролика: 0 запросов — игра его не проигрывает
+                u32 req = 0;
+                for (u32 t = 0; t < b->ntracks; t++)
+                    req += b->audio_req[t];
+                fprintf(stderr, "[bink] movie closed: %u audio frame(s) taken by the game\n", req);
+            }
             g_bink[i] = NULL;
             bink_destroy(b);
             break;
@@ -537,6 +549,9 @@ void hle_binkw32__BinkOpenTrack_8(CPU *c)
         wr32(g_mem, tr + 24, t);
         b->tracks[t] = tr;
         b->dec[t] = bink_audio_new(b->rate[t], ch, (b->flags[t] & 0x1000) != 0, (int)(b->sig >> 24));
+        fprintf(stderr, "[bink] open track %u: %u Hz x%u x%u bit, max %s%u bytes, decoder %s\n", t, b->rate[t], ch,
+                bits, "", mx, b->dec[t] ? "ok" : "NO (тишина)");
+        b->audio_req[t] = 0;
     }
     RET(2, b->tracks[t]);
 }
@@ -594,6 +609,9 @@ void hle_binkw32__BinkGetTrackData_8(CPU *c)
     }
     if (got < bytes)
         memset(g_mem + dst + got, bits8 ? 0x80 : 0, bytes - got);
+    if (b->audio_req[t]++ < 2 || b->audio_req[t] % 300 == 0)
+        fprintf(stderr, "[bink] track %u frame %u: game took %u bytes PCM, decoded %u, requests %u\n", t, b->frame,
+                bytes, got, b->audio_req[t]);
     RET(2, bytes);
 }
 

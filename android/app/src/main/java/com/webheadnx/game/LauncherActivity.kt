@@ -61,7 +61,6 @@ class LauncherActivity : Activity() {
             build()
         }
         refreshStatus()
-        Updater.resumePending(this)  // вернулись из настроек «Установка неизвестных приложений»
         if (fromGame) { fromGame = false; explainFailedStart() }
     }
 

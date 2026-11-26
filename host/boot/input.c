@@ -260,7 +260,11 @@ static int g_layer_btn = -1, g_layer, g_menu;
 // (g_menu_latch) только переводят касания в мышь (g_touch_menu_pass) — стик, кнопки и камера при этом живут.
 static int g_input_frozen;
 static float g_move_speed = 1200.0f, g_cam_speed = 72.0f, g_dead = 0.15f;
+// Мёртвая зона камеры отдельная: у правого стика (и пальца-камеры) она больше — иначе возврат пальца через центр
+// на полпути даёт обратный поворот, и камера «доезжает» влево после поворота вправо. Живёт на ходу (шестерёнка).
+static float g_dead_cam = 0.20f;
 static int g_invert_y;
+static int g_invert_x;  // зеркалить поворот камеры по горизонтали (если у геймпада/оси он обратный)
 // Камера правым стиком. 0 (по умолчанию) — осью джойстика JoyU/JoyV (aMouseX/aMouseY): камера плавная, как на
 // консоли, и в игре мышь не нужна — смещения мыши остаются только меню и паузе, где ими водят курсор (ниже,
 // ветка g_input_frozen). 1 — смещениями мыши DirectInput и в игре (как камера пальцем): так было раньше, но
@@ -282,6 +286,23 @@ void input_set_look_sens(float v)
     if (v > 10.0f)
         v = 10.0f;
     atomic_store_explicit(&g_look_sens, v, memory_order_relaxed);
+}
+// Камера живьём из шестерёнки: чувствительность, мёртвая зона, скорость поворота, зеркало осей. Правит UI-поток,
+// читает поток ввода: значения простые (float/int в одно слово), такая гонка безвредна, замок — от одновременных
+// правок из двух мест.
+static pthread_mutex_t g_cam_lock = PTHREAD_MUTEX_INITIALIZER;
+void input_set_camera(float sens, float dead, float speed, int inv_x, int inv_y)
+{
+    pthread_mutex_lock(&g_cam_lock);
+    if (sens > 0.0f)
+        input_set_look_sens(sens);
+    if (dead >= 0.0f && dead <= 0.6f)
+        g_dead_cam = dead;
+    if (speed >= 10.0f && speed <= 400.0f)
+        g_cam_speed = speed;
+    g_invert_x = inv_x != 0;
+    g_invert_y = inv_y != 0;
+    pthread_mutex_unlock(&g_cam_lock);
 }
 static int g_rumble = 1;
 
@@ -616,6 +637,14 @@ void input_init(const char *user_dir)
             (double)g_cam_speed, (double)atomic_load_explicit(&g_look_sens, memory_order_relaxed));
     // камера пальцем — плавающий правый стик на экране: та же ось, что у геймпада (в игре мыши нет)
     fprintf(stderr, "[input] finger camera: floating right stick -> %s\n", g_cam_mouse ? "mouse deltas" : "joystick axis");
+    // камера из лаунчера: мёртвая зона, скорость поворота и зеркало осей (на ходу их правит шестерёнка)
+    input_set_camera((float)atof(getenv("SNX_LOOK_SENS") ? getenv("SNX_LOOK_SENS") : "0"),
+                     getenv("SNX_CAM_DEAD") ? (float)atof(getenv("SNX_CAM_DEAD")) : -1.0f,
+                     getenv("SNX_CAM_SPEED") ? (float)atof(getenv("SNX_CAM_SPEED")) : 0.0f,
+                     getenv("SNX_CAM_INV_X") && *getenv("SNX_CAM_INV_X") == '1',
+                     getenv("SNX_CAM_INV_Y") && *getenv("SNX_CAM_INV_Y") == '1');
+    fprintf(stderr, "[input] camera: deadzone %.2f, speed %.0f, mirror x=%d y=%d\n", (double)g_dead_cam,
+            (double)g_cam_speed, g_invert_x, g_invert_y);
     const char *e = getenv("SNX_SHOW_FPS");  // поверх Snx.ini: лаунчер Android («Счётчик FPS»)
     if (e)
         d3d8_set_fps_overlay(*e == '1');
@@ -1205,15 +1234,17 @@ static void qm_draw(int w, int h)
     ov_text(fx, fcy - fth * 0.54f, fth, col_ftr, h_b);
 }
 
-// стик с круглой мёртвой зоной: (x, y) -> длина 0..1 с тем же направлением; curve — квадратичный отклик
-static void stick(float x, float y, int curve, float *ox, float *oy)
+// стик с круглой мёртвой зоной: (x, y) -> длина 0..1 с тем же направлением; curve — отклик, dead — зона покоя
+static void stick(float x, float y, int curve, float dead, float *ox, float *oy)
 {
     float m = sqrtf(x * x + y * y);
-    if (m <= g_dead) {
+    if (dead > 0.9f)
+        dead = 0.9f;
+    if (m <= dead) {
         *ox = *oy = 0.0f;
         return;
     }
-    float k = (m - g_dead) / (1.0f - g_dead);
+    float k = (m - dead) / (1.0f - dead);
     k = k > 1.0f ? 1.0f : k;
     if (curve == 1)
         k *= k;  // квадратичная: точнее в центре, но половина хода почти не двигает — для меню
@@ -1663,8 +1694,8 @@ void input_tick(void)
         return;
     }
     float lx, ly, rx, ry;
-    stick(axis_of(SDL_CONTROLLER_AXIS_LEFTX), axis_of(SDL_CONTROLLER_AXIS_LEFTY), 0, &lx, &ly);
-    stick(axis_of(SDL_CONTROLLER_AXIS_RIGHTX), axis_of(SDL_CONTROLLER_AXIS_RIGHTY), 2, &rx, &ry);
+    stick(axis_of(SDL_CONTROLLER_AXIS_LEFTX), axis_of(SDL_CONTROLLER_AXIS_LEFTY), 0, g_dead, &lx, &ly);
+    stick(axis_of(SDL_CONTROLLER_AXIS_RIGHTX), axis_of(SDL_CONTROLLER_AXIS_RIGHTY), 2, g_dead_cam, &rx, &ry);
     if (!g_input_frozen) {
         // джойстик: lX lY — левый стик, lRy lRz (JoyU, JoyV) — правый; крестовина — POV
         static const int pov_of[16] = {-1, 0, 18000, -1, 27000, 31500, 22500, 27000,
@@ -1672,7 +1703,8 @@ void input_tick(void)
         // «Чувствительность камеры» (ползунок лаунчера и шестерёнки) действует в обоих режимах: ось идёт в
         // aMouseX как есть, поэтому множитель закладываем в значение оси.
         float cs = g_cam_speed * atomic_load_explicit(&g_look_sens, memory_order_relaxed);
-        float ax[6] = {lx * g_move_speed, ly * g_move_speed, 0, 0, rx * cs, (g_invert_y ? -ry : ry) * cs};
+        float ax[6] = {lx * g_move_speed, ly * g_move_speed, 0, 0, (g_invert_x ? -rx : rx) * cs,
+                       (g_invert_y ? -ry : ry) * cs};
         if (g_cam_mouse) {  // камера — смещениями мыши, как пальцем (см. g_cam_mouse)
             static float cfx, cfy;
             float k = g_cam_speed * (1200.0f / 72.0f) * atomic_load_explicit(&g_look_sens, memory_order_relaxed) * dt;

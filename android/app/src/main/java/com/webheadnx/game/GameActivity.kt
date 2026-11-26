@@ -57,8 +57,8 @@ class GameActivity : SDLActivity(), InputManager.InputDeviceListener, DisplayMan
         }
         val t = TouchControlsView(this, settings, editMode = false)
         t.onGear = { gearMenu() }
-        // чувствительность камеры из лаунчера: тем же путём, что и ползунок в шестерёнке (без перезапуска)
-        try { SnxNative.lookSens(settings.lookSensitivity) } catch (e: UnsatisfiedLinkError) { }
+        // камера из лаунчера: тем же путём, что и ползунки в шестерёнке (без перезапуска)
+        camApply()
         SDLActivity.mLayout.addView(t, RelativeLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         touch = t
         inputManager = (getSystemService(Context.INPUT_SERVICE) as InputManager).also {
@@ -218,7 +218,31 @@ class GameActivity : SDLActivity(), InputManager.InputDeviceListener, DisplayMan
             ((settings.lookSensitivity - 0.1f) * 10f).toInt().coerceIn(0, 38),
             { "%.1f".format(0.1f + it / 10f) }) {
             settings.lookSensitivity = 0.1f + it / 10f
-            try { SnxNative.lookSens(settings.lookSensitivity) } catch (e: UnsatisfiedLinkError) { }
+            camApply()
+        })
+        // Скорость поворота: сколько поворота даёт полный наклон (CameraSpeed из Snx.ini) — правится на ходу
+        c.addView(Ui.seekRow(this, L.t("Скорость поворота камеры", "Camera turn speed"), 17,
+            ((settings.camSpeed - 30f) / 10f).toInt().coerceIn(0, 17),
+            { "${(30 + it * 10)}" }) {
+            settings.camSpeed = 30f + it * 10f
+            camApply()
+        })
+        // Мёртвая зона камеры: если камера «доезжает» в обратную сторону, когда палец возвращается через центр, — больше
+        c.addView(Ui.seekRow(this, L.t("Мёртвая зона камеры", "Camera dead zone"), 30,
+            ((settings.camDead - 0.05f) * 100f).toInt().coerceIn(0, 30),
+            { "%.2f".format(0.05f + it / 100f) }) {
+            settings.camDead = 0.05f + it / 100f
+            camApply()
+        })
+        c.addView(Ui.switchRow(this, L.t("Зеркалить поворот (влево/вправо)", "Mirror turn (left/right)"), null,
+            settings.camInvX) {
+            settings.camInvX = it
+            camApply()
+        })
+        c.addView(Ui.switchRow(this, L.t("Зеркалить наклон (вверх/вниз)", "Mirror tilt (up/down)"), null,
+            settings.camInvY) {
+            settings.camInvY = it
+            camApply()
         })
         c.addView(Ui.seekRow(this, L.t("Прозрачность кнопок", "Button opacity"), 18,
             ((settings.opacity - 0.1f) * 20f).toInt().coerceIn(0, 18),
@@ -234,6 +258,14 @@ class GameActivity : SDLActivity(), InputManager.InputDeviceListener, DisplayMan
             .setView(ScrollView(this).apply { addView(c) })
             .setPositiveButton(L.t("Готово", "Done"), null)
             .show()
+    }
+
+    // параметры камеры живьём (чувствительность, мёртвая зона, скорость, зеркало осей) — без перезапуска игры
+    private fun camApply() {
+        try {
+            SnxNative.camSet(settings.camDead, settings.camSpeed, settings.camInvX, settings.camInvY)
+            SnxNative.lookSens(settings.lookSensitivity)
+        } catch (e: UnsatisfiedLinkError) { }
     }
 
     // редактор поверх игры (игра идёт дальше, экранный геймпад отпущен)

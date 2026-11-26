@@ -39,6 +39,8 @@ object SnxNative {
     @JvmStatic external fun mouse(x: Float, y: Float, down: Int)
     // чувствительность камеры правого стика: действует сразу, без перезапуска
     @JvmStatic external fun lookSens(v: Float)
+    // камера живьём: мёртвая зона, скорость поворота, зеркало осей (правый стик и палец-камера)
+    @JvmStatic external fun camSet(dead: Float, speed: Float, invX: Boolean, invY: Boolean)
     // частота экрана и ограничение FPS: равны — кадры отмеряет vsync (platform/window.c plat_set_display)
     @JvmStatic external fun display(hz: Float, fpsCap: Int)
     // сбросить файлы гостя и завершить процесс :game (выход кнопкой «Назад»)

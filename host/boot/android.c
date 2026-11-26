@@ -77,6 +77,15 @@ JNIEXPORT void JNICALL JNI_FN(lookSens)(JNIEnv *env, jclass cls, jfloat v)
     input_set_look_sens(v);
 }
 
+// Камера живьём: мёртвая зона, скорость поворота, зеркало осей (правый стик и палец-камера)
+JNIEXPORT void JNICALL JNI_FN(camSet)(JNIEnv *env, jclass cls, jfloat dead, jfloat speed, jboolean inv_x,
+                                     jboolean inv_y)
+{
+    (void)env;
+    (void)cls;
+    input_set_camera(0.0f, dead, speed, inv_x ? 1 : 0, inv_y ? 1 : 0);
+}
+
 // Частота экрана (режим, выбранный GameActivity под ограничение FPS, или смена частоты системой) и ограничение
 JNIEXPORT void JNICALL JNI_FN(display)(JNIEnv *env, jclass cls, jfloat hz, jint fps_cap)
 {

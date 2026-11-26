@@ -11,17 +11,18 @@
     <uses-feature android:name="android.hardware.usb.host" android:required="false" />
 
     <!-- Доступа к файлам нет (игра — в папке приложения, «Импорт» — через системный диалог); «Доступ ко всем
-         файлам» убран — Play Protect предупреждал о приложении с ним. Интернет и установка — только для обновлений
-         (Updater.kt: GitHub Releases; установку каждый раз подтверждает пользователь в системном установщике). -->
+         файлам» убран — Play Protect предупреждал о приложении с ним. Интернет — для проверки обновлений и
+         загрузки игры. REQUEST_INSTALL_PACKAGES (установка APK из приложения) убран: Google Play защита считает
+         приложение с ним «опасным», а APK теперь скачивается браузером из выпуска на GitHub (Updater.kt). -->
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
         android:label="@string/app_name"
         android:icon="@drawable/ic_launcher"
         android:roundIcon="@drawable/ic_launcher"
         android:allowBackup="false"
+        android:usesCleartextTraffic="false"
         android:appCategory="game"
         android:isGame="true"
         android:hardwareAccelerated="true"
@@ -63,11 +64,5 @@
             android:resizeableActivity="false"
             android:maxAspectRatio="3.0"
             android:configChanges="layoutDirection|locale|orientation|uiMode|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation|density" />
-        <!-- скачанный APK обновления — системному установщику (Updater.kt, ApkProvider) -->
-        <provider
-            android:name=".ApkProvider"
-            android:authorities="${applicationId}.apk"
-            android:exported="false"
-            android:grantUriPermissions="true" />
     </application>
 </manifest>

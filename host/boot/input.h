@@ -13,3 +13,5 @@ int input_rumble_enabled(void);
 void input_set_rumble_enabled(int on);
 // Чувствительность камеры правого стика (ползунок в игре действует сразу, без перезапуска)
 void input_set_look_sens(float v);
+// камера живьём (шестерёнка в игре): чувствительность, мёртвая зона, скорость поворота, зеркало осей (0 — как есть)
+void input_set_camera(float sens, float dead, float speed, int inv_x, int inv_y);

@@ -64,6 +64,21 @@ class Settings(private val ctx: Context) {
     var lookSensitivity: Float
         get() = p.getFloat("lookSens", 1.0f)
         set(v) { p.edit().putFloat("lookSens", v).commit() }
+    // Камера (шестерёнка в игре правит на ходу, здесь — значения на запуск):
+    // мёртвая зона — больше, чем у хода: иначе возврат пальца через центр на полпути даёт обратный поворот;
+    // скорость поворота — то же, что CameraSpeed в Snx.ini; зеркало осей — если поворот/наклон идут не туда.
+    var camDead: Float
+        get() = p.getFloat("camDead", 0.20f)
+        set(v) { p.edit().putFloat("camDead", v).commit() }
+    var camSpeed: Float
+        get() = p.getFloat("camSpeed", 72f)
+        set(v) { p.edit().putFloat("camSpeed", v).commit() }
+    var camInvX: Boolean
+        get() = p.getBoolean("camInvX", false)
+        set(v) { p.edit().putBoolean("camInvX", v).commit() }
+    var camInvY: Boolean
+        get() = p.getBoolean("camInvY", false)
+        set(v) { p.edit().putBoolean("camInvY", v).commit() }
     var potionSlot: Int  // слот зелья (1–9) у кнопки «Зелья»: стрелки рядом с ней, короткое нажатие — выпить
         get() = p.getInt("potionSlot", 1).coerceIn(1, 9)
         set(v) { p.edit().putInt("potionSlot", v.coerceIn(1, 9)).apply() }
@@ -118,6 +133,10 @@ class Settings(private val ctx: Context) {
         env("SNX_SHOW_FPS", if (showFps) "1" else "0")
         env("SNX_FILE_CACHE_MB", fileCacheMb.toString())
         env("SNX_LOOK_SENS", "%.2f".format(java.util.Locale.ROOT, lookSensitivity))  // и камера правым стиком
+        env("SNX_CAM_DEAD", "%.2f".format(java.util.Locale.ROOT, camDead))
+        env("SNX_CAM_SPEED", "%.0f".format(java.util.Locale.ROOT, camSpeed))
+        env("SNX_CAM_INV_X", if (camInvX) "1" else "0")
+        env("SNX_CAM_INV_Y", if (camInvY) "1" else "0")
         env("SNX_PAD_CAMERA", if (padCamera == 1) "joystick" else "mouse")
         if (cheats) env("SNX_CHEATS", "1")
         // копия Webhead.exe и .dll во внутренней памяти (runtime/loader.c): их не удалит очистка или антивирус
