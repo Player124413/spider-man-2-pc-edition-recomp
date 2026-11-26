@@ -19,7 +19,6 @@ import android.text.InputType
 import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.EditText
-import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.ScrollView
@@ -233,24 +232,18 @@ class LauncherActivity : Activity() {
         }.start()
     }
 
-    // ---------------------------------------------------------------- уровни, сохранения, читы
+    // ---------------------------------------------------------------- сохранения
+    // Выбор уровня и читы из лаунчера убраны (пока не нужны): остаётся импорт сохранений с ПК.
     private fun extrasCard(): LinearLayout {
         val c = Ui.card(this)
-        c.addView(Ui.title(this, L.t("Уровни, сохранения, читы", "Levels, saves, cheats")))
-        val row = Ui.hbox(this)
-        row.addView(Ui.button(this, L.t("Выбор уровня…", "Level select…")) {
-            Levels.show(this, s.gameDir) { map -> launch(map) }
-        }, wrapGap())
-        row.addView(Ui.button(this, L.t("Импорт сохранений…", "Import saves…")) {
+        c.addView(Ui.title(this, L.t("Сохранения", "Saves")))
+        c.addView(Ui.button(this, L.t("Импорт сохранений…", "Import saves…")) {
             startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), REQ_SAVES)
         }, wrapGap())
-        c.addView(HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(row) })
         c.addView(Ui.label(this, L.t("Сохранения — папка Save с ПК (или папка, в которой она лежит). Прежние сохранения порта " +
             "не пропадут: они переименуются в Save.bak-<дата>.", "Saves: the Save folder from a PC (or the folder containing it). " +
             "The current saves are kept as Save.bak-<date>."), dim = true, size = 12f)
             .apply { setPadding(0, Ui.dp(this@LauncherActivity, 6f), 0, 0) })
-        c.addView(Ui.label(this, L.t("Читы Spider-Man 2 включаются в «Дополнительно» и открываются шестерёнкой в игре.",
-            "Spider-Man 2 cheats are enabled in Advanced and opened by the gear button in game."), dim = true, size = 12f))
         return c
     }
 
@@ -345,9 +338,6 @@ class LauncherActivity : Activity() {
         row.addView(Ui.button(this, L.t("Журнал", "Log")) { showLog() }, wrapGap())
         row.addView(Ui.button(this, L.t("Переменные SNX_*", "SNX_* variables")) { editEnv() }, wrapGap())
         c.addView(row)
-        c.addView(Ui.switchRow(this, L.t("Читы в игре", "In-game cheats"),
-            L.t("Меню шестерёнки → «Читы»: noclip, полёт, бессмертие и другие команды", "Gear menu → Cheats: noclip, fly, god mode and more"),
-            s.cheats) { s.cheats = it })
         c.addView(Ui.switchRow(this, L.t("Проверять обновления", "Check for updates"),
             L.t("При запуске, раз в 6 часов: новая версия на GitHub — предложит скачать", "On start, every 6 hours: offers a new version from GitHub"),
             s.checkUpdates) { s.checkUpdates = it })
