@@ -132,45 +132,25 @@ typedef struct {
 // диагностика кадра (ниже): пишем состояние первых отрисовок кадра, показываем поверх картинки
 static void diag_record(const d3d_rstate *r, const ffkey *k);
 static _Atomic u32 g_diag_clear;  // последний цвет заливки заднего буфера (пишет x_clear)
-// Самодиагностика картинки: порт сам перебирает отладочные варианты состояния отрисовки (0 — как есть, 1 — туман
-// розовый, 2 — без texgen, 3 — TextureFactor белый, 4 — стадия 0 только текстура, 5 — без гаммы Present, 6 — без
-// тумана). Варианты 1 и 3 меняют только uniform'ы (новых программ не нужно), 2, 4 и 6 меняют ключ программы.
-// Два режима: фоновый цикл (DIAG_NORMAL кадров обычной отрисовки, дальше по DIAG_BLOCK кадров на вариант 1..4 —
-// картинка 2/3 времени обычная) и показ «Проверка неба» из настроек: по SKY_SHOW_FRAMES кадров на вариант, имя
-// варианта выводится в углу экрана — стоя там, где небо видно, легко запомнить, на каком варианте оно правильное.
+// Самодиагностика картинки (только для отладки: в интерфейсе пунктов нет): порт сам перебирает отладочные
+// варианты состояния отрисовки (0 — как есть, 1 — туман розовый, 2 — без texgen, 3 — TextureFactor белый,
+// 4 — стадия 0 только текстура, 5 — без гаммы Present, 6 — без тумана). Варианты 1 и 3 меняют только uniform'ы
+// (новых программ не нужно), 2, 4 и 6 меняют ключ программы. Включается SNX_DIAG_AUTO=1: DIAG_NORMAL кадров
+// обычной отрисовки, дальше по DIAG_BLOCK кадров на вариант — картинка 2/3 времени обычная.
 #define DIAG_CYCLE 240
 #define DIAG_NORMAL 160
 #define DIAG_BLOCK 16
-#define DIAG_VARIANTS 7      // вариантов отрисовки, которые перебирает показ «Проверка неба»
-#define DIAG_AUTO_VARIANTS 5 // вариантов, которые перебирает фоновый цикл (6-й меняет ключ — для цикла дорого)
-#define SKY_SHOW_FRAMES 150  // кадров на один вариант в показе «Проверка неба»
-static _Atomic int g_diag_variant;   // вариант, включённый сейчас (читают make_key и uniform'ы)
-static _Atomic int g_sky_show_left;  // кадров показа «Проверка неба» осталось (0 — показа нет)
-static int g_sky_step;               // вариант, который показывает «Проверка неба»
-static int g_sky_hold;               // кадров в текущем варианте показа
+#define DIAG_VARIANTS 6      // вариантов отрисовки перебирает фоновый цикл (6-й, «без тумана», меняет ключ)
+static _Atomic int g_diag_variant;  // вариант, включённый сейчас (читают make_key и uniform'ы)
 
-static const char *diag_variant_name(int v)
-{
-    static const char *const names[DIAG_VARIANTS] = {"как есть", "туман розовый", "без texgen", "TextureFactor белый",
-                                                     "стадия 0 = только текстура", "без гаммы Present", "без тумана"};
-    return v >= 0 && v < DIAG_VARIANTS ? names[v] : "?";
-}
+// Туман (D3DRS_FOGENABLE) выключен всегда: у игры диапазон тумана 5000..50000, то есть туман накрывает только
+// небо — и небо становится ровным цветом тумана вместо своей сиреневой текстуры (в оригинале (150,149,183), в
+// порте с туманом было (251,184,155) — ровный персиковый). Вся остальная геометрия ближе 5000 единиц туманом не
+// накрывалась, так что выключение тумана меняет только небо. Переключателя в интерфейсе нет; для отладки
+// SNX_FOG=1 возвращает туман игры.
+static _Atomic int g_fog = -1;  // -1 — ещё не читали SNX_FOG
 
-// Туман (D3DRS_FOGENABLE). Выключен по умолчанию: у игры диапазон тумана 5000..50000, то есть туман накрывает
-// только небо — и небо становится ровным цветом тумана вместо своей текстуры (в журнале это видно как
-// «тепло=NN%» и ровные клетки сетки). С выключенным туманом небо ровно такое же, как в оригинале (сиреневое),
-// а вся остальная геометрия ближе 5000 единиц всё равно не туманилась. Включается «Настройки» → «Туман как в
-// игре» или SNX_FOG=1.
-static _Atomic int g_fog = -1;   // -1 — ещё не читали SNX_FOG
-static _Atomic int g_fog_dirty;  // 1 — ключи программ собрать заново (туман входит в ключ)
-
-void d3d8_set_fog(int on)
-{
-    atomic_store_explicit(&g_fog, on != 0, memory_order_relaxed);
-    atomic_store_explicit(&g_fog_dirty, 1, memory_order_relaxed);
-}
-
-int d3d8_fog_on(void)
+static int fog_on(void)
 {
     int v = atomic_load_explicit(&g_fog, memory_order_relaxed);
     if (v < 0) {
@@ -179,20 +159,6 @@ int d3d8_fog_on(void)
         atomic_store_explicit(&g_fog, v, memory_order_relaxed);
     }
     return v;
-}
-
-// «Проверка неба» (шестерёнка → «Настройки»): показать варианты по кругу, имя — в углу экрана и в журнале.
-// Пока открыто меню игры, показ стоит на месте: в меню неба не видно, а состояния там менять незачем.
-void d3d8_sky_test(int cycles)
-{
-    if (cycles <= 0)
-        cycles = 3;
-    g_sky_step = 0;
-    g_sky_hold = 0;
-    atomic_store(&g_sky_show_left, cycles * DIAG_VARIANTS * SKY_SHOW_FRAMES);
-    fprintf(stderr, "[diag] показ неба: %d круг(а) по %d вариантов, по %.1f с на вариант; имя варианта — в углу экрана\n",
-            cycles, DIAG_VARIANTS, (double)SKY_SHOW_FRAMES / 60.0);
-    fprintf(stderr, "[diag] небо v0: %s\n", diag_variant_name(0));
 }
 
 // Четырехсимвольные коды форматов (DXT1/DXT3/DXT5) — читаемо в логе
@@ -220,8 +186,7 @@ static void diag_sweep_note(int cycle)
     else
         fprintf(stderr,
                 "[diag] картинка: раз в %d кадров «[diag] pic» — полосы самой картинки, доля персиковых пикселей и "
-                "сетка 12x8 (перебор вариантов в фоне выключен, SNX_DIAG_AUTO=1 его включает). «Проверка неба» в "
-                "шестерёнке показывает все %d вариантов по кругу с именем в углу экрана\n",
+                "сетка 12x8 (перебор %d вариантов в фоне выключен, SNX_DIAG_AUTO=1 его включает)\n",
                 DIAG_CYCLE, DIAG_VARIANTS);
 }
 
@@ -319,7 +284,7 @@ static void make_key(const d3d_rstate *d, const vdecl *decl, ffkey *k)
     }
     if (rs[28] && g_diag_variant == 6)  // вариант самодиагностики: туман выключен целиком (видно, что им закрашено)
         k->fog = FOG_NONE;
-    else if (rs[28] && d3d8_fog_on()) {  // FOGENABLE (и туман не выключен настройкой порта — см. d3d8_fog_on)
+    else if (rs[28] && fog_on()) {  // FOGENABLE (туман игры выключен — см. fog_on)
         u32 table = rs[35], vert = rs[140];
         if (table) {
             k->fog = FOG_PIXEL;
@@ -2661,14 +2626,12 @@ void d3d8_set_fps_overlay(int on) { g_fps_overlay = on; }
 int d3d8_fps_overlay(void) { return g_fps_overlay; }
 
 // ================================================================ диагностика кадра
-// Включается на ходу: «Настройки» → «Диагностика кадра». Нужна, чтобы по одному скриншоту с телефона понять,
+// Включается только отладочным ключом SNX_DIAG=1 (пункта в интерфейсе нет). Нужна, чтобы по скриншоту понять,
 // откуда взялся цвет на экране: фон заливки Clear, туман, TextureFactor/материал или стадии текстуры. Сверху —
 // доминирующий цвет двух полос заднего буфера ДО гаммы Present (совпадает ли он с Clear/туманом), ниже —
 // состояние первых четырёх отрисовок кадра (стадии, texgen, texture transform, туман, смешивание, z-тест).
 #define DIAG_DRAWS 4
-static _Atomic int g_diag = -1;  // -1 — ещё не читали SNX_DIAG (лаунчер: «Диагностика кадра»)
-
-void d3d8_set_diag(int on) { atomic_store_explicit(&g_diag, on != 0, memory_order_relaxed); }
+static _Atomic int g_diag = -1;  // -1 — ещё не читали SNX_DIAG
 
 int d3d8_diag(void)
 {
@@ -3516,57 +3479,31 @@ void d3d8_present(d3ddev *d)
     pa.no_gamma = atomic_load_explicit(&g_diag_variant, memory_order_relaxed) == 5;  // показ «без гаммы»
     cs_async(x_present_pass, &pa, sizeof pa);
     // ------------------------------------------------------------------ диагностика картинки в лог
-    // Порт сам ищет, что красит небо. Фоновый цикл (DIAG_CYCLE кадров) перебирает варианты состояния отрисовки, а
-    // «Проверка неба» из настроек показывает их по кругу с именем варианта в углу экрана: стоя там, где небо видно,
-    // легко заметить, на каком варианте оно такое же, как в оригинале. В журнал идёт «[diag] pic»: clear, туман,
+    // Разбор неба уже сделан (туман игры выключен, см. fog_on), но замеры остались отладочным ключом. Фоновый
+    // цикл (DIAG_CYCLE кадров) перебирает варианты состояния отрисовки, когда включён SNX_DIAG_AUTO=1. В журнал
+    // идёт «[diag] pic»: clear, туман,
     // гамма-LUT игры, границы картинки без чёрных полос, цвет четырёх полос картинки, доля «тёплых» (персиковых)
     // пикселей, состояние первых отрисовок и грубая сетка 12x8 — картинка кадра текстом.
     static int diag_log_on = -1, diag_cycle = 0;
     if (diag_log_on < 0) {
         // SNX_DIAG_AUTO: не задано — только замеры (картинка не меняется), 1 — ещё и фоновый перебор вариантов,
         // 0 — выключить совсем. Перебор в фоне искажает картинку на треть времени, поэтому по умолчанию выключен:
-        // варианты показывает «Проверка неба» в шестерёнке, когда это нужно.
+        // пункта в интерфейсе нет, включается только этим ключом.
         const char *e = getenv("SNX_DIAG_AUTO");
         diag_log_on = !(e && *e == '0');
         diag_cycle = e && *e == '1';
         if (diag_log_on)
             diag_sweep_note(diag_cycle);
     }
-    // Туман переключили на ходу («Туман как в игре»): туман входит в ключ программы — просим собрать ключи заново
-    if (atomic_exchange_explicit(&g_fog_dirty, 0, memory_order_relaxed)) {
-        d3ddev *gd = d3d8_dev();
-        if (gd)
-            cs_cmd_push(x_diag_invalidate, &gd, sizeof gd);
-    }
-    // Показ «Проверка неба»: по SKY_SHOW_FRAMES кадров на вариант. В меню игры показ стоит на месте — там неба не
-    // видно, а состояния менять незачем (кнопку как раз нажимают из меню).
-    int show_on = 0;
-    if (atomic_load_explicit(&g_sky_show_left, memory_order_relaxed) > 0 && !game_menu_open(NULL)) {
-        show_on = 1;
-        if (++g_sky_hold > SKY_SHOW_FRAMES) {
-            g_sky_hold = 1;
-            g_sky_step = (g_sky_step + 1) % DIAG_VARIANTS;
-            fprintf(stderr, "[diag] небо v%d: %s\n", g_sky_step, diag_variant_name(g_sky_step));
-        }
-        int left = atomic_load_explicit(&g_sky_show_left, memory_order_relaxed) - 1;
-        atomic_store_explicit(&g_sky_show_left, left, memory_order_relaxed);
-        if (left <= 0) {
-            fprintf(stderr, "[diag] показ неба закончен\n");
-            g_sky_hold = 0;
-            g_sky_step = 0;
-        }
-    }
     int diag_meas = diag_log_on && w > 0 && h > 0 && d->draws >= 8;
     int phase = (int)(d->frame % DIAG_CYCLE), want = 0, sample_now = 0;
-    if (show_on)
-        want = g_sky_step;
-    else if (diag_meas && !diag_cycle)
+    if (diag_meas && !diag_cycle)
         sample_now = phase == DIAG_NORMAL / 2;  // вариант не перебираем — только замер раз в цикл
     else if (diag_meas) {
-        // 0..DIAG_NORMAL-1 — обычная отрисовка, дальше по DIAG_BLOCK кадров на вариант v1..v4
+        // 0..DIAG_NORMAL-1 — обычная отрисовка, дальше по DIAG_BLOCK кадров на вариант v1..v4 (v5 меняет ключ — пропуск)
         int p = phase >= DIAG_NORMAL ? phase - DIAG_NORMAL : -1;
         want = p < 0 ? 0 : 1 + p / DIAG_BLOCK;
-        if (want >= DIAG_AUTO_VARIANTS)
+        if (want > 4)
             want = 0;
         // замер в середине обычного блока и в конце каждого блока варианта
         sample_now = phase == DIAG_NORMAL / 2 || (p >= 0 && p % DIAG_BLOCK == DIAG_BLOCK - 1);
@@ -3575,8 +3512,8 @@ void d3d8_present(d3ddev *d)
         atomic_store(&g_diag_variant, want);
         cs_cmd_push(x_diag_invalidate, &d, sizeof d);  // команды по порядку: следующий кадр соберёт ключи заново
     }
-    // Замер кадра: на метке цикла, в конце блока варианта и в середине показа «Проверка неба»
-    int want_pic = diag_meas && (sample_now || (show_on && g_sky_hold == SKY_SHOW_FRAMES / 2));
+    // Замер кадра: на метке цикла и в конце блока варианта
+    int want_pic = diag_meas && sample_now;
     if (want_pic) {
         frame_probe fp;
         memset(&fp, 0, sizeof fp);
@@ -3612,10 +3549,10 @@ void d3d8_present(d3ddev *d)
                 snprintf(bl + bo, sizeof bl - bo, " тепло=нет");
             fprintf(stderr, "%s\n", bl);
             // Грубая сетка кадра (12x8): строка — полоса по высоте сверху вниз, столбцы — слева направо.
-            // Печатаем не каждый замер: в показе «Проверка неба» — всегда, иначе когда в кадре есть персиковое
-            // небо (тепло) и не чаще раза в 600 кадров, — иначе журнал распухает.
+            // Печатаем не каждый замер: когда в кадре есть персиковое небо (тепло) и не чаще раза в 600 кадров,
+            // — иначе журнал распухает.
             static int last_grid_frame;
-            int want_grid = show_on || fp.warmpct >= 5 || d->frame - last_grid_frame >= 600;
+            int want_grid = fp.warmpct >= 5 || d->frame - last_grid_frame >= 600;
             if (want_grid)
                 last_grid_frame = (int)d->frame;
             for (int r = 0; want_grid && r < GRID_ROWS; r++) {
@@ -3652,7 +3589,7 @@ void d3d8_present(d3ddev *d)
                 fprintf(stderr, "%s\n", buf);
         }
     }
-    // Диагностика кадра («Настройки» → «Диагностика кадра»): две полосы заднего буфера читаем на Core 2 до гаммы
+    // Диагностика кадра (SNX_DIAG=1): две полосы заднего буфера читаем на Core 2 до гаммы
     // Present, текст показываем в слое порта ниже — по скриншоту видно, откуда цвет: Clear, туман, TextureFactor
     // или стадии текстуры (d0 — первая отрисовка кадра, обычно небо).
     int diag_on = d3d8_diag() && w > 0 && h > 0;
@@ -3668,19 +3605,6 @@ void d3d8_present(d3ddev *d)
         game_menu_draw_overlay(w, h, fdx, fdy, fdw, fdh);
         if (diag_on)
             diag_text(w, h, &dsa, &dsb);
-        if (show_on) {  // показ «Проверка неба»: номер и имя варианта в углу, чтобы запомнить нужный
-            char nm[96];
-            snprintf(nm, sizeof nm, "НЕБО v%d: %s", g_sky_step, diag_variant_name(g_sky_step));
-            float fh = (float)h * 0.032f, pad;
-            if (fh < 14.0f)
-                fh = 14.0f;
-            if (fh > 44.0f)
-                fh = 44.0f;
-            pad = fh * 0.3f;
-            ov_rect(fh * 0.5f - pad, fh * 0.5f - pad, ov_text_width(fh, nm) + 2.0f * pad, fh + 2.0f * pad,
-                    OV_RGBA(0, 0, 0, 190));
-            ov_text(fh * 0.5f, fh * 0.5f, fh, OV_RGBA(255, 240, 200, 255), nm);
-        }
         ov_flush(0, w, h);
     }
     // счётчик на экране: кадров за последние полсекунды

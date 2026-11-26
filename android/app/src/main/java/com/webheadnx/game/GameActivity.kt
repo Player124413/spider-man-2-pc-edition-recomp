@@ -57,8 +57,8 @@ class GameActivity : SDLActivity(), InputManager.InputDeviceListener, DisplayMan
         }
         val t = TouchControlsView(this, settings, editMode = false)
         t.onGear = { gearMenu() }
-        // диагностика кадра из прошлого запуска: включаем до первого кадра (переключатель — тоже на ходу)
-        try { SnxNative.diag(settings.diag) } catch (e: UnsatisfiedLinkError) { }
+        // чувствительность камеры из лаунчера: тем же путём, что и ползунок в шестерёнке (без перезапуска)
+        try { SnxNative.lookSens(settings.lookSensitivity) } catch (e: UnsatisfiedLinkError) { }
         SDLActivity.mLayout.addView(t, RelativeLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         touch = t
         inputManager = (getSystemService(Context.INPUT_SERVICE) as InputManager).also {
@@ -216,7 +216,10 @@ class GameActivity : SDLActivity(), InputManager.InputDeviceListener, DisplayMan
         c.setPadding(pad, Ui.dp(this, 8f), pad, 0)
         c.addView(Ui.seekRow(this, L.t("Чувствительность камеры", "Camera sensitivity"), 38,
             ((settings.lookSensitivity - 0.1f) * 10f).toInt().coerceIn(0, 38),
-            { "%.1f".format(0.1f + it / 10f) }) { settings.lookSensitivity = 0.1f + it / 10f })
+            { "%.1f".format(0.1f + it / 10f) }) {
+            settings.lookSensitivity = 0.1f + it / 10f
+            try { SnxNative.lookSens(settings.lookSensitivity) } catch (e: UnsatisfiedLinkError) { }
+        })
         c.addView(Ui.seekRow(this, L.t("Прозрачность кнопок", "Button opacity"), 18,
             ((settings.opacity - 0.1f) * 20f).toInt().coerceIn(0, 18),
             { "${((0.1f + it / 20f) * 100).toInt()} %" }) {
@@ -225,22 +228,6 @@ class GameActivity : SDLActivity(), InputManager.InputDeviceListener, DisplayMan
         })
         c.addView(Ui.switchRow(this, L.t("Вибрация кнопок", "Button vibration"), null, settings.haptics) {
             settings.haptics = it
-        })
-        // разбор картинки по скриншоту: цвет заливки, туман, TextureFactor и первые отрисовки кадра
-        c.addView(Ui.switchRow(this, L.t("Диагностика кадра", "Frame diagnostics"), null, settings.diag) {
-            settings.diag = it
-            try { SnxNative.diag(it) } catch (e: UnsatisfiedLinkError) { }
-        })
-        // туман игры: у неё диапазон тумана 5000..50000, и он накрывает только небо, крася его ровным цветом
-        // тумана вместо текстуры; выключен по умолчанию — небо тогда как в оригинале
-        c.addView(Ui.switchRow(this, L.t("Туман как в игре", "Game fog"), L.t("Выкл: небо как в оригинале (туман у игры накрывает только его)", "Off: the sky matches the original (the game's fog covers only it)"), settings.fog) {
-            settings.fog = it
-            try { SnxNative.fog(it) } catch (e: UnsatisfiedLinkError) { }
-        })
-        // «Проверка неба»: нажать, стоя там, где небо видно — порт покажет варианты отрисовки по кругу (номер и
-        // название варианта — в углу экрана) и запишет замеры в журнал (лаунчер → «Журнал» / snx.log)
-        c.addView(Ui.button(this, L.t("Проверка неба (в журнал)", "Sky check (to the log)")) {
-            try { SnxNative.skyTest() } catch (e: UnsatisfiedLinkError) { }
         })
         AlertDialog.Builder(this)
             .setTitle(L.t("Настройки", "Settings"))

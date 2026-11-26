@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <unistd.h>
 
+#include "host/boot/input.h"
 #include "host/boot/touch.h"
 #include "platform/window.h"
 #include "runtime/hle/d3d8.h"
@@ -75,30 +76,12 @@ JNIEXPORT void JNICALL JNI_FN(menuTap)(JNIEnv *env, jclass cls, jfloat u, jfloat
     touch_menu_tap(u, v, down ? 1 : 0);
 }
 
-// Диагностика кадра поверх картинки: цвет заливки, туман, TextureFactor и первые отрисовки кадра. Пишет поток
-// рендера, показывает поток гостя (d3d8_present) — вызов безопасен в любой момент.
-JNIEXPORT void JNICALL JNI_FN(diag)(JNIEnv *env, jclass cls, jboolean on)
+// Чувствительность камеры правого стика: ползунок в шестерёнке действует сразу, без перезапуска игры
+JNIEXPORT void JNICALL JNI_FN(lookSens)(JNIEnv *env, jclass cls, jfloat v)
 {
     (void)env;
     (void)cls;
-    d3d8_set_diag(on ? 1 : 0);
-}
-
-// «Проверка неба»: показ вариантов отрисовки (туман, texgen, TextureFactor, гамма) с именем в углу экрана и
-// замерами в лог — в журнале видно, на каком варианте цвет неба меняется
-JNIEXPORT void JNICALL JNI_FN(skyTest)(JNIEnv *env, jclass cls)
-{
-    (void)env;
-    (void)cls;
-    d3d8_sky_test(3);
-}
-
-// Туман игры (D3DRS_FOGENABLE): по умолчанию выключен — он красит небо ровным цветом тумана
-JNIEXPORT void JNICALL JNI_FN(fog)(JNIEnv *env, jclass cls, jboolean on)
-{
-    (void)env;
-    (void)cls;
-    d3d8_set_fog(on ? 1 : 0);
+    input_set_look_sens(v);
 }
 
 // Частота экрана (режим, выбранный GameActivity под ограничение FPS, или смена частоты системой) и ограничение

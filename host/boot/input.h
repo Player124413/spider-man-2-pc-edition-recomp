@@ -11,3 +11,5 @@ void input_tick(void);
 void input_rumble(unsigned short low_freq, unsigned short high_freq, unsigned int duration_ms);
 int input_rumble_enabled(void);
 void input_set_rumble_enabled(int on);
+// Чувствительность камеры правого стика (ползунок в игре действует сразу, без перезапуска)
+void input_set_look_sens(float v);

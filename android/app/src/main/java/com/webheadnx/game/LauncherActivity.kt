@@ -288,10 +288,6 @@ class LauncherActivity : Activity() {
                 dim = true, size = 12f))
             holder.addView(Ui.switchRow(this, L.t("16-битные текстуры", "16-bit textures"), L.t("Меньше памяти и быстрее на слабых GPU, чуть хуже цвета", "Less memory and faster on weak GPUs, slightly worse colors"),
                 s.tex16) { s.tex16 = it })
-            holder.addView(Ui.switchRow(this, L.t("Туман как в игре", "Game fog"),
-                L.t("Выкл: небо как в оригинале — туман у игры накрывает только его и красит ровным цветом",
-                    "Off: the sky matches the original — the game's fog covers only the sky and paints it flat"),
-                s.fog) { s.fog = it })
             holder.addView(Ui.switchRow(this, L.t("Стабильная производительность", "Sustained performance"),
                 L.t("Частоты ниже пика, зато без перегрева и падения FPS через 10 минут (если телефон умеет)", "Lower peak clocks, but no overheating and FPS drops after 10 minutes (if supported)"), s.sustained) { s.sustained = it })
             holder.addView(Ui.switchRow(this, L.t("Счётчик FPS", "FPS counter"), null, s.showFps) { s.showFps = it })

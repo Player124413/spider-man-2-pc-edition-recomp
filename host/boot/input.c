@@ -7,6 +7,7 @@
 #include <errno.h>
 #include <math.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -265,7 +266,19 @@ static int g_invert_y;
 // 1,2 на отсчёт в секунду (MouseX: Axis aMouseX Speed=6, ×0,01; UInput::ReadInput ×20/Δt), то есть
 // CameraSpeed 72 ≈ 1200 отсчётов/с при полном наклоне; ещё × «Чувствительность камеры» лаунчера (SNX_LOOK_SENS).
 static int g_cam_mouse = 1;
-static float g_look_sens = 1.0f;
+// Чувствительность камеры правится на ходу («Настройки» в игре — ползунок без перезапуска): читает поток ввода,
+// пишет UI-поток, поэтому атомарно.
+static _Atomic float g_look_sens = 1.0f;
+void input_set_look_sens(float v)
+{
+    if (!(v > 0.0f))
+        return;
+    if (v < 0.1f)
+        v = 0.1f;
+    if (v > 10.0f)
+        v = 10.0f;
+    atomic_store_explicit(&g_look_sens, v, memory_order_relaxed);
+}
 static int g_rumble = 1;
 
 // ---------------------------------------------------------------- геймпады и вибрация (SDL_GameControllerRumble)
@@ -594,9 +607,9 @@ void input_init(const char *user_dir)
         g_cam_mouse = strcasecmp(cm, "joystick") != 0;
     const char *ls = getenv("SNX_LOOK_SENS");
     if (ls && atof(ls) > 0.0)
-        g_look_sens = (float)atof(ls);
+        input_set_look_sens((float)atof(ls));
     fprintf(stderr, "[input] right stick camera: %s, speed %.0f, sensitivity %.2f\n", g_cam_mouse ? "mouse" : "joystick",
-            (double)g_cam_speed, (double)g_look_sens);
+            (double)g_cam_speed, (double)atomic_load_explicit(&g_look_sens, memory_order_relaxed));
     const char *e = getenv("SNX_SHOW_FPS");  // поверх Snx.ini: лаунчер Android («Счётчик FPS»)
     if (e)
         d3d8_set_fps_overlay(*e == '1');
@@ -1196,8 +1209,10 @@ static void stick(float x, float y, int curve, float *ox, float *oy)
     }
     float k = (m - g_dead) / (1.0f - g_dead);
     k = k > 1.0f ? 1.0f : k;
-    if (curve)
-        k *= k;
+    if (curve == 1)
+        k *= k;  // квадратичная: точнее в центре, но половина хода почти не двигает — для меню
+    else if (curve == 2)
+        k = powf(k, 1.4f);  // камера: мягко в центре, но чувствуется с половины хода
     *ox = x / m * k;
     *oy = y / m * k;
 }
@@ -1666,7 +1681,7 @@ void input_tick(void)
     }
     float lx, ly, rx, ry;
     stick(axis_of(SDL_CONTROLLER_AXIS_LEFTX), axis_of(SDL_CONTROLLER_AXIS_LEFTY), 0, &lx, &ly);
-    stick(axis_of(SDL_CONTROLLER_AXIS_RIGHTX), axis_of(SDL_CONTROLLER_AXIS_RIGHTY), 1, &rx, &ry);
+    stick(axis_of(SDL_CONTROLLER_AXIS_RIGHTX), axis_of(SDL_CONTROLLER_AXIS_RIGHTY), 2, &rx, &ry);
     if (!g_input_frozen) {
         // джойстик: lX lY — левый стик, lRy lRz (JoyU, JoyV) — правый; крестовина — POV
         static const int pov_of[16] = {-1, 0, 18000, -1, 27000, 31500, 22500, 27000,
@@ -1675,7 +1690,7 @@ void input_tick(void)
                        (g_invert_y ? -ry : ry) * g_cam_speed};
         if (g_cam_mouse) {  // камера — смещениями мыши, как пальцем (см. g_cam_mouse)
             static float cfx, cfy;
-            float k = g_cam_speed * (1200.0f / 72.0f) * g_look_sens * dt;
+            float k = g_cam_speed * (1200.0f / 72.0f) * atomic_load_explicit(&g_look_sens, memory_order_relaxed) * dt;
             ax[4] = ax[5] = 0.0f;
             cfx += rx * k;
             cfy += (g_invert_y ? -ry : ry) * k;

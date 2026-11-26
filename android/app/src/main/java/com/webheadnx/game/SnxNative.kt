@@ -38,12 +38,8 @@ object SnxNative {
     // виртуальная мышь: -1 — только перемещение курсора, 2 — щелчок по точке, 1/0 — зажать/отпустить ЛКМ;
     // координаты в долях окна
     @JvmStatic external fun mouse(x: Float, y: Float, down: Int)
-    // диагностика кадра поверх картинки: заливка, туман, TextureFactor и первые отрисовки — для отладки цвета
-    @JvmStatic external fun diag(on: Boolean)
-    // туман игры (по умолчанию выключен: он накрывает небо и красит его ровным цветом тумана)
-    @JvmStatic external fun fog(on: Boolean)
-    // «Проверка неба»: крутит отладочные варианты отрисовки и пишет замеры в лог (разбор цвета неба)
-    @JvmStatic external fun skyTest()
+    // чувствительность камеры правого стика: действует сразу, без перезапуска
+    @JvmStatic external fun lookSens(v: Float)
     // частота экрана и ограничение FPS: равны — кадры отмеряет vsync (platform/window.c plat_set_display)
     @JvmStatic external fun display(hz: Float, fpsCap: Int)
     // сбросить файлы гостя и завершить процесс :game (выход кнопкой «Назад»)
