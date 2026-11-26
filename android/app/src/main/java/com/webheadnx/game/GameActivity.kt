@@ -231,8 +231,8 @@ class GameActivity : SDLActivity(), InputManager.InputDeviceListener, DisplayMan
             settings.diag = it
             try { SnxNative.diag(it) } catch (e: UnsatisfiedLinkError) { }
         })
-        // «Проверка неба»: нажать, стоя там, где небо видно — порт на ~10 секунд переберёт варианты отрисовки
-        // (небо/туман/texgen/TextureFactor) и запишет замеры в журнал (лаунчер → «Журнал» / snx.log)
+        // «Проверка неба»: нажать, стоя там, где небо видно — порт покажет варианты отрисовки по кругу (номер и
+        // название варианта — в углу экрана) и запишет замеры в журнал (лаунчер → «Журнал» / snx.log)
         c.addView(Ui.button(this, L.t("Проверка неба (в журнал)", "Sky check (to the log)")) {
             try { SnxNative.skyTest() } catch (e: UnsatisfiedLinkError) { }
         })

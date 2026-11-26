@@ -132,26 +132,42 @@ typedef struct {
 // диагностика кадра (ниже): пишем состояние первых отрисовок кадра, показываем поверх картинки
 static void diag_record(const d3d_rstate *r, const ffkey *k);
 static _Atomic u32 g_diag_clear;  // последний цвет заливки заднего буфера (пишет x_clear)
-// Самодиагностика картинки: раз в DIAG_ROT кадров включается один отладочный вариант состояния (0 — как есть,
-// 1 — туман розовый, 2 — без texgen, 3 — TextureFactor белый, 4 — стадия 0 только текстура). По строке «[diag]»
-// в логе видно, какой вариант меняет цвет неба, — причина находится по одному прогону. Варианты, меняющие только
-// uniform'ы (1 и 3), не требуют новых программ; 2 и 4 собирают по одной программе на материал.
-// Цикл замера: DIAG_NORMAL кадров обычной отрисовки, затем по DIAG_BLOCK кадров на каждый отладочный вариант.
-// Так игра остаётся играбельной (2/3 времени картинка обычная), а в журнал попадают замеры всех вариантов.
+// Самодиагностика картинки: порт сам перебирает отладочные варианты состояния отрисовки (0 — как есть, 1 — туман
+// розовый, 2 — без texgen, 3 — TextureFactor белый, 4 — стадия 0 только текстура, 5 — без гаммы Present, 6 — без
+// тумана). Варианты 1 и 3 меняют только uniform'ы (новых программ не нужно), 2, 4 и 6 меняют ключ программы.
+// Два режима: фоновый цикл (DIAG_NORMAL кадров обычной отрисовки, дальше по DIAG_BLOCK кадров на вариант 1..4 —
+// картинка 2/3 времени обычная) и показ «Проверка неба» из настроек: по SKY_SHOW_FRAMES кадров на вариант, имя
+// варианта выводится в углу экрана — стоя там, где небо видно, легко запомнить, на каком варианте оно правильное.
 #define DIAG_CYCLE 240
 #define DIAG_NORMAL 160
 #define DIAG_BLOCK 16
-#define DIAG_VARIANTS 5      // v0 как есть, v1 туман розовый, v2 без texgen, v3 TextureFactor белый, v4 только текстура
-#define DIAG_LOG_EVERY 300   // кадров между строками «[diag] pic», если цикл не активен (с меню/роликами)
-#define DIAG_STRIPS 5        // полос кадра для замера цвета (сверху вниз: небо, крыши, стены)
-static _Atomic int g_diag_variant;
-static _Atomic int g_diag_burst;     // кадров частых замеров после «Проверки неба»
+#define DIAG_VARIANTS 7      // вариантов отрисовки, которые перебирает показ «Проверка неба»
+#define DIAG_AUTO_VARIANTS 5 // вариантов, которые перебирает фоновый цикл (6-й меняет ключ — для цикла дорого)
+#define SKY_SHOW_FRAMES 150  // кадров на один вариант в показе «Проверка неба»
+static _Atomic int g_diag_variant;   // вариант, включённый сейчас (читают make_key и uniform'ы)
+static _Atomic int g_sky_show_left;  // кадров показа «Проверка неба» осталось (0 — показа нет)
+static int g_sky_step;               // вариант, который показывает «Проверка неба»
+static int g_sky_hold;               // кадров в текущем варианте показа
 
-// «Проверка неба» (шестерёнка → «Настройки»): частые замеры на ~10 секунд
-void d3d8_sky_test(int frames)
+static const char *diag_variant_name(int v)
 {
-    atomic_store(&g_diag_burst, frames > 0 ? frames : 400);
-    fprintf(stderr, "[diag] sky test: частые замеры %d кадров\n", frames > 0 ? frames : 400);
+    static const char *const names[DIAG_VARIANTS] = {"как есть", "туман розовый", "без texgen", "TextureFactor белый",
+                                                     "стадия 0 = только текстура", "без гаммы Present", "без тумана"};
+    return v >= 0 && v < DIAG_VARIANTS ? names[v] : "?";
+}
+
+// «Проверка неба» (шестерёнка → «Настройки»): показать варианты по кругу, имя — в углу экрана и в журнале.
+// Пока открыто меню игры, показ стоит на месте: в меню неба не видно, а состояния там менять незачем.
+void d3d8_sky_test(int cycles)
+{
+    if (cycles <= 0)
+        cycles = 3;
+    g_sky_step = 0;
+    g_sky_hold = 0;
+    atomic_store(&g_sky_show_left, cycles * DIAG_VARIANTS * SKY_SHOW_FRAMES);
+    fprintf(stderr, "[diag] показ неба: %d круг(а) по %d вариантов, по %.1f с на вариант; имя варианта — в углу экрана\n",
+            cycles, DIAG_VARIANTS, (double)SKY_SHOW_FRAMES / 60.0);
+    fprintf(stderr, "[diag] небо v0: %s\n", diag_variant_name(0));
 }
 
 // Четырехсимвольные коды форматов (DXT1/DXT3/DXT5) — читаемо в логе
@@ -171,10 +187,11 @@ static void diag_sweep_note(void)
         return;
     done = 1;
     fprintf(stderr,
-            "[diag] картинка: раз в цикл (%d кадров) порт на %d кадров включает варианты v1 туман розовый, v2 без "
-            "texgen, v3 TextureFactor белый, v4 стадия 0 = только текстура (v0 — как есть) и пишет «[diag] pic» с "
-            "цветом пяти полос кадра и состоянием первых отрисовок; «Проверка неба» в шестерёнке — частые замеры\n",
-            DIAG_CYCLE, DIAG_BLOCK * 4);
+            "[diag] картинка: раз в %d кадров порт на %d кадров включает варианты v1 туман розовый, v2 без texgen, "
+            "v3 TextureFactor белый, v4 стадия 0 = только текстура (v0 — как есть) и пишет «[diag] pic»: полосы самой "
+            "картинки, доля персиковых пикселей и сетку 12x8. «Проверка неба» в шестерёнке показывает все %d "
+            "вариантов по кругу (включая v5 без гаммы и v6 без тумана) с именем в углу экрана\n",
+            DIAG_CYCLE, DIAG_BLOCK * 4, DIAG_VARIANTS);
 }
 
 typedef struct {
@@ -269,7 +286,9 @@ static void make_key(const d3d_rstate *d, const vdecl *decl, ffkey *k)
         for (int i = 0; i < MAX_LIGHTS; i++)
             k->light[i] = d->light_on[i] ? (u8)(d->lights[i].type <= 3 ? d->lights[i].type : 3) : 0;
     }
-    if (rs[28]) {  // FOGENABLE
+    if (rs[28] && g_diag_variant == 6)  // вариант самодиагностики: туман выключен целиком (видно, что им закрашено)
+        k->fog = FOG_NONE;
+    else if (rs[28]) {  // FOGENABLE
         u32 table = rs[35], vert = rs[140];
         if (table) {
             k->fog = FOG_PIXEL;
@@ -2634,6 +2653,7 @@ int d3d8_diag(void)
 typedef struct {
     u32 nstages, tex, tci, gen, ttf, proj, tf, fogc, flags;
     u32 tw[2], th[2], tfm[2];  // текстуры стадий 0 и 1: размер и формат D3D
+    float tm[8];               // матрица текстур стадии 0: строки u и смещения (видны схлопнутые координаты)
     u8 cop, ca1, ca2;          // операция стадии 0 (D3DTOP и аргументы)
 } diag_rec;
 
@@ -2664,6 +2684,13 @@ static void diag_record(const d3d_rstate *r, const ffkey *k)
             q.th[s] = t->h;
             q.tfm[s] = t->fmt;
         }
+    }
+    if (k->nstages && k->st[0].ttf_count) {  // матрица текстур стадии 0: 1-я строка (u) и строка смещения
+        const float *m = r->texm[0];
+        for (int i = 0; i < 4; i++)
+            q.tm[i] = m[i];
+        for (int i = 0; i < 4; i++)
+            q.tm[4 + i] = m[8 + i];
     }
     q.cop = k->st[0].cop;
     q.ca1 = k->st[0].ca1;
@@ -2747,6 +2774,179 @@ static void x_diag_strip(void *arg)
     free(px);
 }
 
+// ================================================================ замер кадра целиком
+// Полосы по фиксированным процентам высоты попадали в кинематографические чёрные полосы, поэтому кадр целиком
+// уменьшается на GPU (blit в 80x48: 15 КБ вместо 3 МБ полного чтения) и разбирается на CPU. Чёрные полосы
+// отбрасываются, цвета берутся по полосам самой картинки, а в журнал попадает грубая сетка 12x8 — по ней видно,
+// где небо и какого оно цвета, и с чем сравнивать варианты состояния.
+#define PROBE_W 80
+#define PROBE_H 48
+#define GRID_COLS 12
+#define GRID_ROWS 8
+#define DIAG_BANDS 4
+static const float diag_band_at[DIAG_BANDS] = {0.06f, 0.20f, 0.36f, 0.60f};  // доля высоты картинки сверху
+
+typedef struct {
+    d3ddev *d;
+    int ok;
+    float pic0, pic1;      // границы картинки без чёрных полос (доля высоты кадра, 0 — верх)
+    u32 band[DIAG_BANDS];  // доминирующий цвет полос картинки сверху вниз
+    int bandpct[DIAG_BANDS];
+    int warmpct;           // доля «тёплых» (персиковых) пикселей картинки — так небо выглядит в порте
+    u32 warmrgb;
+    float wx0, wx1, wy0, wy1;
+    u32 grid[GRID_ROWS][GRID_COLS];
+} frame_probe;
+
+static GLuint g_probe_fbo, g_probe_tex;
+static u8 g_probe_px[PROBE_W * PROBE_H * 4];   // уменьшенная копия кадра, сверху вниз
+static u8 g_probe_raw[PROBE_W * PROBE_H * 4];  // как читает glReadPixels — снизу вверх
+
+// Доминирующий цвет прямоугольника уменьшенной копии (квантование 4 бита на канал) и его доля в процентах
+static u32 probe_dom(int x0, int y0, int cw, int ch, int *pct)
+{
+    static u16 cnt[4096];
+    static u32 sum[4096][3];
+    memset(cnt, 0, sizeof cnt);
+    if (x0 < 0)
+        x0 = 0;
+    if (y0 < 0)
+        y0 = 0;
+    if (x0 + cw > PROBE_W)
+        cw = PROBE_W - x0;
+    if (y0 + ch > PROBE_H)
+        ch = PROBE_H - y0;
+    unsigned n = 0;
+    for (int y = y0; y < y0 + ch; y++)
+        for (int x = x0; x < x0 + cw; x++) {
+            const u8 *p = g_probe_px + 4 * (y * PROBE_W + x);
+            u32 c = (((u32)p[0] >> 4) << 8) | (((u32)p[1] >> 4) << 4) | ((u32)p[2] >> 4);
+            if (!cnt[c])
+                sum[c][0] = sum[c][1] = sum[c][2] = 0;
+            cnt[c]++;
+            sum[c][0] += p[0];
+            sum[c][1] += p[1];
+            sum[c][2] += p[2];
+            n++;
+        }
+    int best = 0;
+    for (int c = 1; c < 4096; c++)
+        if (cnt[c] > cnt[best])
+            best = c;
+    if (pct)
+        *pct = n ? (int)((u64)cnt[best] * 100u / n) : 0;
+    if (!cnt[best])
+        return 0;
+    return ((sum[best][0] / cnt[best]) << 16) | ((sum[best][1] / cnt[best]) << 8) | (sum[best][2] / cnt[best]);
+}
+
+// Один замер: уменьшенная копия заднего буфера (blit с усреднением) — до гаммы Present, как и раньше
+static void x_diag_frame(void *arg)
+{
+    frame_probe *a = arg;
+    d3d_rstate *r = &a->d->r;
+    d3dsurf *bb = a->d->backbuffer;
+    a->ok = 0;
+    if (!bb || !bb->w || !bb->h)
+        return;
+    if (!r->blit_fbo)
+        glGenFramebuffers(1, &r->blit_fbo);
+    if (!g_probe_fbo) {
+        glGenFramebuffers(1, &g_probe_fbo);
+        glGenTextures(1, &g_probe_tex);
+        glBindTexture(GL_TEXTURE_2D, g_probe_tex);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, PROBE_W, PROBE_H, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, g_probe_fbo);
+        glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g_probe_tex, 0);
+    }
+    glDisable(GL_SCISSOR_TEST);  // blit не должен обрезаться ножницами Clear
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, r->blit_fbo);
+    d3d8_fbo_attach(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, bb);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, g_probe_fbo);
+    glBlitFramebuffer(0, 0, (GLint)bb->w, (GLint)bb->h, 0, 0, PROBE_W, PROBE_H, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, g_probe_fbo);
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glPixelStorei(GL_PACK_ROW_LENGTH, 0);
+    glReadPixels(0, 0, PROBE_W, PROBE_H, GL_RGBA, GL_UNSIGNED_BYTE, g_probe_raw);
+    glBindFramebuffer(GL_FRAMEBUFFER, r->fbo);
+    r->gl_dirty |= GLD_SCISSOR;  // следующим отрисовкам ножницы поставить заново
+    for (int y = 0; y < PROBE_H; y++)  // GL читает снизу вверх — переворачиваем
+        memcpy(g_probe_px + 4 * y * PROBE_W, g_probe_raw + 4 * (PROBE_H - 1 - y) * PROBE_W, 4 * PROBE_W);
+    a->ok = 1;
+    // Чёрные кинематографические полосы: строка, в которой все пиксели почти чёрные
+    int top = 0, bot = PROBE_H - 1;
+    for (int y = 0; y < PROBE_H; y++) {
+        int blk = 1;
+        for (int x = 0; x < PROBE_W && blk; x++) {
+            const u8 *p = g_probe_px + 4 * (y * PROBE_W + x);
+            if (p[0] > 10 || p[1] > 10 || p[2] > 10)
+                blk = 0;
+        }
+        if (!blk)
+            break;
+        top = y + 1;
+    }
+    for (int y = PROBE_H - 1; y > top; y--) {
+        int blk = 1;
+        for (int x = 0; x < PROBE_W && blk; x++) {
+            const u8 *p = g_probe_px + 4 * (y * PROBE_W + x);
+            if (p[0] > 10 || p[1] > 10 || p[2] > 10)
+                blk = 0;
+        }
+        if (!blk)
+            break;
+        bot = y - 1;
+    }
+    if (bot - top < 4) {  // полос нет или кадр целиком чёрный
+        top = 0;
+        bot = PROBE_H - 1;
+    }
+    a->pic0 = (float)top / PROBE_H;
+    a->pic1 = (float)(bot + 1) / PROBE_H;
+    // Полосы внутри картинки (небо, крыши, стены, земля)
+    for (int i = 0; i < DIAG_BANDS; i++) {
+        int y = top + (int)(diag_band_at[i] * (float)(bot - top));
+        int h = (bot - top) / 12;
+        a->band[i] = probe_dom(0, y, PROBE_W, h > 2 ? h : 2, &a->bandpct[i]);
+    }
+    // «Тёплые» пиксели: небо в порте — ровный персиковый (251,184,155)
+    unsigned n = 0, warm = 0;
+    u64 wr = 0, wg = 0, wb = 0;
+    int wx0 = PROBE_W, wx1 = -1, wy0 = PROBE_H, wy1 = -1;
+    for (int y = top; y <= bot; y++)
+        for (int x = 0; x < PROBE_W; x++) {
+            const u8 *p = g_probe_px + 4 * (y * PROBE_W + x);
+            n++;
+            if (p[0] >= 140 && (int)p[0] - (int)p[2] >= 35 && p[1] >= p[2] && (int)p[0] - (int)p[1] >= 20) {
+                warm++;
+                wr += p[0];
+                wg += p[1];
+                wb += p[2];
+                if (x < wx0)
+                    wx0 = x;
+                if (x > wx1)
+                    wx1 = x;
+                if (y < wy0)
+                    wy0 = y;
+                if (y > wy1)
+                    wy1 = y;
+            }
+        }
+    a->warmpct = n ? (int)((u64)warm * 100u / n) : 0;
+    a->warmrgb = warm ? (u32)(((wr / warm) << 16) | ((wg / warm) << 8) | (wb / warm)) : 0;
+    a->wx0 = warm ? (float)wx0 / PROBE_W : 0.0f;
+    a->wx1 = warm ? (float)(wx1 + 1) / PROBE_W : 0.0f;
+    a->wy0 = warm ? (float)wy0 / PROBE_H : 0.0f;
+    a->wy1 = warm ? (float)(wy1 + 1) / PROBE_H : 0.0f;
+    // Грубая сетка кадра целиком (вместе с полосами) — «картинка в журнале»
+    for (int rr = 0; rr < GRID_ROWS; rr++)
+        for (int cc = 0; cc < GRID_COLS; cc++)
+            a->grid[rr][cc] = probe_dom(cc * PROBE_W / GRID_COLS, rr * PROBE_H / GRID_ROWS, PROBE_W / GRID_COLS,
+                                        PROBE_H / GRID_ROWS, NULL);
+}
+
 static void diag_text(int w, int h, const diag_strip_args *sa, const diag_strip_args *sb)
 {
     char line[12][192];
@@ -2827,10 +3027,12 @@ typedef struct {
     int win_w, win_h;
     int dx, dy, dw, dh;
     int update_gamma;
+    int no_gamma;            // вариант самодиагностики: вывод кадра без гамма-LUT (видно, не гамма ли красит небо)
     u16 gamma_rgb[256][3];  // 256x1 RGB16 LUT (0..65535 -> [0, 1])
 } present_pass_args;
 
 static GLuint g_post_prog, g_post_vao, g_gamma_tex;
+static GLint g_post_u_nogam = -1;  // вариант самодиагностики «без гаммы»
 
 // ================================================================ 1-проходное GPU-размытие теней-проекторов
 // Эквивалент 9 проходов FCanvasUtil::DrawTile (3x3, смещение ±step_px, SrcAlpha=28/255, Dest=One)
@@ -2987,9 +3189,14 @@ static void post_init_gl(void)
         "in vec2 v_uv;\n"
         "uniform sampler2D u_frame;\n"
         "uniform sampler2D u_gamma;\n"
+        "uniform int u_nogam;\n"
         "out vec4 o_color;\n"
         "void main() {\n"
         "  vec3 c = clamp(texture(u_frame, v_uv).rgb, 0.0, 1.0);\n"
+        "  if (u_nogam != 0) {  // вариант самодиагностики: кадр как есть, без гамма-LUT игры\n"
+        "    o_color = vec4(c, 1.0);\n"
+        "    return;\n"
+        "  }\n"
         "  vec3 u = (c * 255.0 + 0.5) / 256.0;\n"
         "  o_color = vec4(texture(u_gamma, vec2(u.r, 0.5)).r,\n"
         "                 texture(u_gamma, vec2(u.g, 0.5)).g,\n"
@@ -3010,6 +3217,7 @@ static void post_init_gl(void)
             glUseProgram(g_post_prog);
             glUniform1i(glGetUniformLocation(g_post_prog, "u_frame"), 0);
             glUniform1i(glGetUniformLocation(g_post_prog, "u_gamma"), 1);
+            g_post_u_nogam = glGetUniformLocation(g_post_prog, "u_nogam");
         }
     }
     if (v)
@@ -3070,6 +3278,8 @@ static void x_present_pass(void *arg)
         return;
     glViewport(a->dx, a->dy, a->dw, a->dh);
     glUseProgram(g_post_prog);
+    if (g_post_u_nogam >= 0)
+        glUniform1i(g_post_u_nogam, a->no_gamma ? 1 : 0);
     glBindVertexArray(g_post_vao);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, a->bb_tex);
@@ -3272,13 +3482,14 @@ void d3d8_present(d3ddev *d)
         }
         d->gamma_dirty = 0;
     }
+    pa.no_gamma = atomic_load_explicit(&g_diag_variant, memory_order_relaxed) == 5;  // показ «без гаммы»
     cs_async(x_present_pass, &pa, sizeof pa);
     // ------------------------------------------------------------------ диагностика картинки в лог
-    // Порт сам ищет, что красит небо: раз в цикл (DIAG_CYCLE кадров) он по DIAG_BLOCK кадров включает отладочные
-    // варианты состояния и в конце каждого блока пишет «[diag] pic» — доминирующий цвет пяти полос кадра до гаммы
-    // (небо, крыши, стены) плюс clear, туман и состояние первых отрисовок (текстура и её формат, texgen, texture
-    // transform, TextureFactor, туман, смешивание, освещение). Вариант, на котором цвет неба меняется, и есть
-    // причина. «Проверка неба» в шестерёнке включает частые замеры — стоять там, где небо видно.
+    // Порт сам ищет, что красит небо. Фоновый цикл (DIAG_CYCLE кадров) перебирает варианты состояния отрисовки, а
+    // «Проверка неба» из настроек показывает их по кругу с именем варианта в углу экрана: стоя там, где небо видно,
+    // легко заметить, на каком варианте оно такое же, как в оригинале. В журнал идёт «[diag] pic»: clear, туман,
+    // гамма-LUT игры, границы картинки без чёрных полос, цвет четырёх полос картинки, доля «тёплых» (персиковых)
+    // пикселей, состояние первых отрисовок и грубая сетка 12x8 — картинка кадра текстом.
     static int diag_log_on = -1;
     if (diag_log_on < 0) {
         const char *e = getenv("SNX_DIAG_AUTO");
@@ -3286,61 +3497,117 @@ void d3d8_present(d3ddev *d)
         if (diag_log_on)
             diag_sweep_note();
     }
-    static const float strips[DIAG_STRIPS] = {0.88f, 0.76f, 0.70f, 0.62f, 0.52f};
+    // Показ «Проверка неба»: по SKY_SHOW_FRAMES кадров на вариант. В меню игры показ стоит на месте — там неба не
+    // видно, а состояния менять незачем (кнопку как раз нажимают из меню).
+    int show_on = 0;
+    if (atomic_load_explicit(&g_sky_show_left, memory_order_relaxed) > 0 && !game_menu_open(NULL)) {
+        show_on = 1;
+        if (++g_sky_hold > SKY_SHOW_FRAMES) {
+            g_sky_hold = 1;
+            g_sky_step = (g_sky_step + 1) % DIAG_VARIANTS;
+            fprintf(stderr, "[diag] небо v%d: %s\n", g_sky_step, diag_variant_name(g_sky_step));
+        }
+        int left = atomic_load_explicit(&g_sky_show_left, memory_order_relaxed) - 1;
+        atomic_store_explicit(&g_sky_show_left, left, memory_order_relaxed);
+        if (left <= 0) {
+            fprintf(stderr, "[diag] показ неба закончен\n");
+            g_sky_hold = 0;
+            g_sky_step = 0;
+        }
+    }
     int diag_meas = diag_log_on && w > 0 && h > 0 && d->draws >= 8;
     int phase = (int)(d->frame % DIAG_CYCLE), want = 0, sample_now = 0;
-    if (diag_meas) {
+    if (show_on)
+        want = g_sky_step;
+    else if (diag_meas) {
         // 0..DIAG_NORMAL-1 — обычная отрисовка, дальше по DIAG_BLOCK кадров на вариант v1..v4
         int p = phase >= DIAG_NORMAL ? phase - DIAG_NORMAL : -1;
         want = p < 0 ? 0 : 1 + p / DIAG_BLOCK;
-        if (want >= DIAG_VARIANTS)
+        if (want >= DIAG_AUTO_VARIANTS)
             want = 0;
-        // замер в конце каждого блока варианта и один в середине обычного блока
+        // замер в середине обычного блока и в конце каждого блока варианта
         sample_now = phase == DIAG_NORMAL / 2 || (p >= 0 && p % DIAG_BLOCK == DIAG_BLOCK - 1);
     }
     if (want != (int)atomic_load(&g_diag_variant)) {
         atomic_store(&g_diag_variant, want);
         cs_cmd_push(x_diag_invalidate, &d, sizeof d);  // команды по порядку: следующий кадр соберёт ключи заново
     }
-    static int burst;  // частые замеры после кнопки «Проверка неба»
-    if (atomic_load(&g_diag_burst) > 0) {
-        int b = atomic_load(&g_diag_burst);
-        atomic_store(&g_diag_burst, b > 1 ? b - 1 : 0);
-        burst = 1;
-    } else
-        burst = 0;
-    int want_pic = diag_meas && (sample_now || (burst && d->frame % 30 == 0));
+    // Замер кадра: на метке цикла, в конце блока варианта и в середине показа «Проверка неба»
+    int want_pic = diag_meas && (sample_now || (show_on && g_sky_hold == SKY_SHOW_FRAMES / 2));
     if (want_pic) {
-        diag_strip_args st[DIAG_STRIPS];
-        for (int i = 0; i < DIAG_STRIPS; i++) {
-            st[i] = (diag_strip_args){d, strips[i], 0, 0, 0, 0};
-            cs_sync(x_diag_strip, &st[i]);
+        frame_probe fp;
+        memset(&fp, 0, sizeof fp);
+        fp.d = d;
+        cs_sync(x_diag_frame, &fp);
+        if (fp.ok) {
+            // Гамма-LUT игры: во что она превращает уровни 0x40/0x80/0xC0 (проверка «не гамма ли красит небо»)
+            static const int gin[3] = {0x40, 0x80, 0xC0};
+            char gs[3 * 24];
+            size_t go = 0;
+            for (int i = 0; i < 3; i++)
+                go += (size_t)snprintf(gs + go, sizeof gs - go, " %02X:%02X%02X%02X", gin[i],
+                                       (int)(d->gamma[0][gin[i]] >> 8), (int)(d->gamma[1][gin[i]] >> 8),
+                                       (int)(d->gamma[2][gin[i]] >> 8));
+            u32 clr = atomic_load_explicit(&g_diag_clear, memory_order_relaxed), fogc = d->r.rs[34];
+            fprintf(stderr,
+                    "[diag] pic v=%d clear=%08X(%02X,%02X,%02X) fog=%08X(%02X,%02X,%02X) %.1f..%.1f gam%s frame=%d "
+                    "draws=%u\n",
+                    (int)g_diag_variant, clr, (clr >> 16) & 0xFF, (clr >> 8) & 0xFF, clr & 0xFF, fogc,
+                    (fogc >> 16) & 0xFF, (fogc >> 8) & 0xFF, fogc & 0xFF, (double)u2f(d->r.rs[36]),
+                    (double)u2f(d->r.rs[37]), gs, d->frame, d->draws);
+            // Цвет полос самой картинки (чёрные кинематографические полосы уже отброшены)
+            char bl[DIAG_BANDS * 32 + 128];
+            size_t bo = (size_t)snprintf(bl, sizeof bl, "[diag] картинка %.2f..%.2f сверху:", fp.pic0, fp.pic1);
+            for (int i = 0; i < DIAG_BANDS; i++)
+                bo += (size_t)snprintf(bl + bo, sizeof bl - bo, " %d%%=%02X%02X%02X/%d%%",
+                                       (int)(diag_band_at[i] * 100.0f), (fp.band[i] >> 16) & 0xFF,
+                                       (fp.band[i] >> 8) & 0xFF, fp.band[i] & 0xFF, fp.bandpct[i]);
+            if (fp.warmpct)
+                snprintf(bl + bo, sizeof bl - bo, " тепло=%d%% y=%.2f..%.2f x=%.2f..%.2f avg=%06X", fp.warmpct, fp.wy0,
+                         fp.wy1, fp.wx0, fp.wx1, fp.warmrgb);
+            else
+                snprintf(bl + bo, sizeof bl - bo, " тепло=нет");
+            fprintf(stderr, "%s\n", bl);
+            // Грубая сетка кадра (12x8): строка — полоса по высоте сверху вниз, столбцы — слева направо.
+            // Печатаем не каждый замер: в показе «Проверка неба» — всегда, иначе когда в кадре есть персиковое
+            // небо (тепло) и не чаще раза в 600 кадров, — иначе журнал распухает.
+            static int last_grid_frame;
+            int want_grid = show_on || fp.warmpct >= 5 || d->frame - last_grid_frame >= 600;
+            if (want_grid)
+                last_grid_frame = (int)d->frame;
+            for (int r = 0; want_grid && r < GRID_ROWS; r++) {
+                char gr[GRID_COLS * 8 + 32];
+                size_t gro = (size_t)snprintf(gr, sizeof gr, "[diag] сетка %2d%%:", (int)((float)r * 100.0f / GRID_ROWS));
+                for (int c = 0; c < GRID_COLS; c++)
+                    gro += (size_t)snprintf(gr + gro, sizeof gr - gro, " %02X%02X%02X", (fp.grid[r][c] >> 16) & 0xFF,
+                                            (fp.grid[r][c] >> 8) & 0xFF, fp.grid[r][c] & 0xFF);
+                fprintf(stderr, "%s\n", gr);
+            }
+            // Состояние первых отрисовок кадра (только без отладочного варианта): по нему видно, чем нарисовано небо
+            int nd = (int)g_diag_variant ? 0 : atomic_load_explicit(&g_diag_n, memory_order_relaxed);
+            char buf[1600];
+            size_t off = 0;
+            for (int i = 0; i < nd && off < sizeof buf - 320; i++) {
+                const diag_rec *q = &g_diag_rec[i];
+                char f0[8], f1[8];
+                fmt_name(f0, sizeof f0, q->tfm[0]);
+                fmt_name(f1, sizeof f1, q->tfm[1]);
+                off += (size_t)snprintf(buf + off, sizeof buf - off,
+                                        "\n[diag] d%d{st%u tex%u:%ux%u/%s,%ux%u/%s tci%X gen%u/%u ttf%u/%u pj%X tf=%08X "
+                                        "op%u/%u/%u fm%u ab%u lit%u",
+                                        i, (unsigned)q->nstages, q->tex & 3u, q->tw[0], q->th[0], f0, q->tw[1], q->th[1],
+                                        f1, (unsigned)q->tci, q->gen & 3u, (q->gen >> 2) & 3u, q->ttf & 3u,
+                                        (q->ttf >> 2) & 3u, (unsigned)q->proj, q->tf, q->cop, q->ca1, q->ca2,
+                                        q->flags & 3u, (q->flags >> 3) & 1u, (q->flags >> 4) & 1u);
+                if (q->ttf & 3u)  // матрица текстур стадии 0: строки u и смещения
+                    off += (size_t)snprintf(buf + off, sizeof buf - off, " tm=%.3g,%.3g,%.3g,%.3g/%.3g,%.3g,%.3g,%.3g",
+                                            q->tm[0], q->tm[1], q->tm[2], q->tm[3], q->tm[4], q->tm[5], q->tm[6],
+                                            q->tm[7]);
+                off += (size_t)snprintf(buf + off, sizeof buf - off, "}");
+            }
+            if (off)
+                fprintf(stderr, "%s\n", buf);
         }
-        char sl[DIAG_STRIPS * 32];
-        size_t so = 0;
-        for (int i = 0; i < DIAG_STRIPS; i++)
-            so += (size_t)snprintf(sl + so, sizeof sl - so, " %d=%02X%02X%02X/%d%%", (int)(strips[i] * 100.0f),
-                                   (st[i].rgb >> 16) & 0xFF, (st[i].rgb >> 8) & 0xFF, st[i].rgb & 0xFF, st[i].pct);
-        fprintf(stderr, "[diag] pic v=%d clear=%08X fog=%08X frame=%d draws=%u%s\n", (int)g_diag_variant,
-                atomic_load_explicit(&g_diag_clear, memory_order_relaxed), d->r.rs[34], d->frame, d->draws, sl);
-        // состояние первых отрисовок кадра (только в обычном замере): по нему видно, чем нарисовано небо
-        int nd = (int)g_diag_variant ? 0 : atomic_load_explicit(&g_diag_n, memory_order_relaxed);
-        char buf[768];
-        size_t off = 0;
-        for (int i = 0; i < nd && off < sizeof buf - 200; i++) {
-            const diag_rec *q = &g_diag_rec[i];
-            char f0[8], f1[8];
-            fmt_name(f0, sizeof f0, q->tfm[0]);
-            fmt_name(f1, sizeof f1, q->tfm[1]);
-            off += (size_t)snprintf(buf + off, sizeof buf - off,
-                                    "\n[diag] d%d{st%u tex%u:%ux%u/%s,%ux%u/%s tci%X gen%u/%u ttf%u/%u tf=%08X "
-                                    "op%u/%u/%u fm%u ab%u lit%u}",
-                                    i, (unsigned)q->nstages, q->tex & 3u, q->tw[0], q->th[0], f0, q->tw[1], q->th[1],
-                                    f1, (unsigned)q->tci, q->gen & 3u, (q->gen >> 2) & 3u, q->ttf & 3u,
-                                    (q->ttf >> 2) & 3u, q->tf, q->cop, q->ca1, q->ca2, q->flags & 3u,
-                                    (q->flags >> 3) & 1u, (q->flags >> 4) & 1u);
-        }
-        fprintf(stderr, "%s\n", buf);
     }
     // Диагностика кадра («Настройки» → «Диагностика кадра»): две полосы заднего буфера читаем на Core 2 до гаммы
     // Present, текст показываем в слое порта ниже — по скриншоту видно, откуда цвет: Clear, туман, TextureFactor
@@ -3358,6 +3625,19 @@ void d3d8_present(d3ddev *d)
         game_menu_draw_overlay(w, h, fdx, fdy, fdw, fdh);
         if (diag_on)
             diag_text(w, h, &dsa, &dsb);
+        if (show_on) {  // показ «Проверка неба»: номер и имя варианта в углу, чтобы запомнить нужный
+            char nm[96];
+            snprintf(nm, sizeof nm, "НЕБО v%d: %s", g_sky_step, diag_variant_name(g_sky_step));
+            float fh = (float)h * 0.032f, pad;
+            if (fh < 14.0f)
+                fh = 14.0f;
+            if (fh > 44.0f)
+                fh = 44.0f;
+            pad = fh * 0.3f;
+            ov_rect(fh * 0.5f - pad, fh * 0.5f - pad, ov_text_width(fh, nm) + 2.0f * pad, fh + 2.0f * pad,
+                    OV_RGBA(0, 0, 0, 190));
+            ov_text(fh * 0.5f, fh * 0.5f, fh, OV_RGBA(255, 240, 200, 255), nm);
+        }
         ov_flush(0, w, h);
     }
     // счётчик на экране: кадров за последние полсекунды
