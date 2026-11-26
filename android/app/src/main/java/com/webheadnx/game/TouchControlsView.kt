@@ -34,6 +34,10 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
     // главное меню на ролике: тапы по пустому месту идут в SDL, но экранные кнопки не прячем
     var passThroughMenu = false
         set(v) { if (field != v) { field = v; releaseAll(); invalidate() } }
+    // есть живой герой (из SnxNative.state): тап по пустому месту — камера; иначе (заставка, логотипы,
+    // катсцены, меню) — виртуальная мышь. Не зависит от защёлки меню, поэтому меню работает всегда.
+    var inGame = false
+        set(v) { if (field != v) { field = v; releaseAll(); invalidate() } }
     var onGear: (() -> Unit)? = null
     // Кнопка «Меню» (Plus) дополнительно переключает принудительный режим меню порта: в нём джойстик
     // не двигает героя, а тапы по пустому месту выбирают пункты. Повторное нажатие возвращает управление.
@@ -107,7 +111,7 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
         (!hiddenByMenu && !hiddenByGamepad && settings.touchEnabled)
     private fun controlsVisible(): Boolean = editMode ||
         (!hiddenByMenu && !hiddenByGamepad && settings.touchEnabled)
-    private fun menuActive() = passThroughMenu || hiddenByMenu || menuOverride
+    private fun menuActive() = passThroughMenu || hiddenByMenu || menuOverride || !inGame
     private fun menuTapAt(x: Float, y: Float): Boolean = menuActive() &&
         hit(x, y, ALL_KINDS) == null && slotArrowAt(x, y) == 0 && floatingStickAt(x) == null &&
         !onGearAt(x, y)
@@ -443,7 +447,9 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
             mouseX = x
             mouseY = y
             // Тап = щелчок в точке пальца. Перетаскивание = только наведение (ползунки/подсветка).
-            if (hypot(x - f.startX, y - f.startY) < 12f * density)
+            // порог щелчка с запасом: палец при тапе всегда чуть смещается, а промах на 12 dp читался
+            // как «ведение» и пункт меню не нажимался
+            if (hypot(x - f.startX, y - f.startY) < 24f * density)
                 SnxNative.mouse(x / max(1f, w()), y / max(1f, h()), 2)
             invalidate()
             return

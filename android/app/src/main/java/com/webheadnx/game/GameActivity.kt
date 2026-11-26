@@ -14,7 +14,9 @@ import android.view.Surface
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.widget.LinearLayout
 import android.widget.RelativeLayout
+import android.widget.ScrollView
 import org.libsdl.app.SDLActivity
 
 // Игра: SDLActivity (libSDL2.so + libmain.so, SDL_main из host/boot/main.c) в отдельном процессе :game.
@@ -32,6 +34,8 @@ class GameActivity : SDLActivity(), InputManager.InputDeviceListener, DisplayMan
             t.hiddenByMenu = st and SnxNative.STATE_MENU != 0
             // в главном меню на рольке кнопки должны оставаться: именно A/крестовина выбирают пункты
             t.passThroughMenu = st and SnxNative.STATE_MENU_PASS != 0
+            // живой герой в мире: в игре палец — камера, в меню/катсцене — виртуальная мышь
+            t.inGame = st and SnxNative.STATE_IN_GAME != 0
             t.postDelayed(this, 100)
         }
     }
@@ -187,14 +191,43 @@ class GameActivity : SDLActivity(), InputManager.InputDeviceListener, DisplayMan
 
     // шестерёнка: редактор раскладки. Читы из Shrek 2 в Spider-Man 2 не работают — меню убрано.
     private fun gearMenu() {
-        if (!settings.cheats) return openEditor()
+        val items = mutableListOf(L.t("Редактор управления", "Touch layout"), L.t("Настройки", "Settings"))
+        if (settings.cheats) items.add(L.t("Читы", "Cheats"))
         AlertDialog.Builder(this)
             .setTitle(L.t("Меню", "Menu"))
-            .setItems(arrayOf(L.t("Редактор управления", "Touch layout"),
-                L.t("Читы", "Cheats"))) { _, i ->
-                if (i == 0) openEditor() else Cheats.show(this) { touch?.invalidate() }
+            .setItems(items.toTypedArray()) { _, i ->
+                when (i) {
+                    0 -> openEditor()
+                    1 -> settingsMenu()
+                    else -> Cheats.show(this) { touch?.invalidate() }
+                }
             }
             .setNegativeButton(L.t("Отмена", "Cancel"), null)
+            .show()
+    }
+
+    // Настройки на ходу. Чувствительность камеры TouchControlsView читает при каждом движении пальца,
+    // поэтому ползунок действует сразу, без перезапуска игры.
+    private fun settingsMenu() {
+        val c = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val pad = Ui.dp(this, 16f)
+        c.setPadding(pad, Ui.dp(this, 8f), pad, 0)
+        c.addView(Ui.seekRow(this, L.t("Чувствительность камеры", "Camera sensitivity"), 38,
+            ((settings.lookSensitivity - 0.1f) * 10f).toInt().coerceIn(0, 38),
+            { "%.1f".format(0.1f + it / 10f) }) { settings.lookSensitivity = 0.1f + it / 10f })
+        c.addView(Ui.seekRow(this, L.t("Прозрачность кнопок", "Button opacity"), 18,
+            ((settings.opacity - 0.1f) * 20f).toInt().coerceIn(0, 18),
+            { "${((0.1f + it / 20f) * 100).toInt()} %" }) {
+            settings.opacity = 0.1f + it / 20f
+            touch?.invalidate()
+        })
+        c.addView(Ui.switchRow(this, L.t("Вибрация кнопок", "Button vibration"), null, settings.haptics) {
+            settings.haptics = it
+        })
+        AlertDialog.Builder(this)
+            .setTitle(L.t("Настройки", "Settings"))
+            .setView(ScrollView(this).apply { addView(c) })
+            .setPositiveButton(L.t("Готово", "Done"), null)
             .show()
     }
 

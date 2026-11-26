@@ -24,6 +24,7 @@ object SnxNative {
     const val STATE_MENU = 1
     const val STATE_READY = 2
     const val STATE_MENU_PASS = 4  // главное меню на Bink-заставке: касания идут в SDL, кнопки остаются
+    const val STATE_IN_GAME = 8    // в мире есть живой герой: палец по пустому месту — камера, вне игры — мышь
 
     @JvmStatic external fun pad(buttons: Int, lx: Float, ly: Float, rx: Float, ry: Float)
     @JvmStatic external fun look(dx: Float, dy: Float)

@@ -1287,6 +1287,9 @@ static struct {
 } g_touch_mouse[16];
 static int g_ntouch_mouse;
 static volatile int g_touch_menu, g_touch_ready, g_touch_menu_pass;
+// В мире есть живой герой (game_player_active): по этому признаку экранное управление решает, куда идёт тап
+// по пустому месту — в игре камера, вне игры (заставка, логотипы, катсцены) виртуальная мышь.
+static volatile int g_touch_in_game;
 // главное меню остаётся на экране и после того, как Bink-ролик доиграл: держим режим меню, пока не
 // появится пешка игрока (реально началась игра). Иначе экранные стики правят персонажем в меню.
 static volatile int g_menu_latch;
@@ -1332,7 +1335,8 @@ void touch_key(int vk, int down)
 // бит 2 — главное меню на Bink-заставке (касания проходят к SDL, но кнопки остаются на экране)
 int touch_state(void)
 {
-    return (g_touch_menu ? 1 : 0) | (g_touch_ready ? 2 : 0) | (g_touch_menu_pass ? 4 : 0);
+    return (g_touch_menu ? 1 : 0) | (g_touch_ready ? 2 : 0) | (g_touch_menu_pass ? 4 : 0) |
+           (g_touch_in_game ? 8 : 0);
 }
 
 void touch_menu_override(int on)
@@ -1615,10 +1619,7 @@ void input_tick(void)
     // (Options/Credits внутри меню) не должен её снимать: иначе после возврата мышь «зависает».
     if (game_player_active())
         g_menu_latch = 0;
-    // Защёлка нужна только во фронт-энде. Открылось настоящее GUI-меню или пошёл игровой ролик (вступление,
-    // катсцена) — игра уже не в главном меню, и защёлка лишь ловила бы тапы как клики ЛКМ в геймплее.
-    if (gui_menu || bink_game_movie_active())
-        g_menu_latch = 0;
+    g_touch_in_game = game_player_active() != 0;
     int menu = gui_menu || g_menu_override || menu_movie || g_menu_latch;
     // Замораживает ввод игры только настоящее GUI-меню и явный режим «Меню». Заставка главного меню и защёлка
     // нужны лишь для того, чтобы касания по пустому месту шли в мышь: если защёлка не снимется (игра не сообщила
