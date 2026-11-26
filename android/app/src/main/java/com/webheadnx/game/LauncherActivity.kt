@@ -320,8 +320,8 @@ class LauncherActivity : Activity() {
             { "%.1f".format(0.1f + it / 10f) }) { s.lookSensitivity = 0.1f + it / 10f })
         c.addView(Ui.choiceRow(this, L.t("Камера правым стиком геймпада", "Gamepad right stick camera"),
             listOf(L.t("Как палец", "Like touch"), L.t("Ось джойстика", "Joystick axis")), s.padCamera.coerceIn(0, 1)) { s.padCamera = it })
-        c.addView(Ui.label(this, L.t("«Как палец» — камера не пропадает (было на Retroid Pocket, GameSir); скорость — ползунок выше.",
-            "“Like touch” keeps the camera from dropping out (seen on Retroid Pocket, GameSir); speed is the slider above."), dim = true, size = 12f))
+        c.addView(Ui.label(this, L.t("«Ось джойстика» (по умолчанию) — камера плавная, как на консоли: мышь в игре не нужна, ею водят только курсор в меню и паузе. «Как палец» — запасной вариант, если камера осью пропадает (Retroid Pocket, GameSir). Скорость — ползунок выше.",
+            "“Joystick axis” (default) is smooth console-style camera control: the mouse is only used for the cursor in menus and pause. “Like touch” is the fallback if the axis camera drops out (Retroid Pocket, GameSir). Speed is the slider above."), dim = true, size = 12f))
         c.addView(Ui.seekRow(this, L.t("Прозрачность кнопок", "Button opacity"), 18, ((s.opacity - 0.1f) * 20f).toInt(),
             { "${((0.1f + it / 20f) * 100).toInt()} %" }) { s.opacity = 0.1f + it / 20f })
         return c

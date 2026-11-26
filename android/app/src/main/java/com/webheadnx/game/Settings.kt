@@ -70,9 +70,13 @@ class Settings(private val ctx: Context) {
     var haptics: Boolean
         get() = p.getBoolean("haptics", true)
         set(v) { p.edit().putBoolean("haptics", v).commit() }
-    var padCamera: Int  // камера правым стиком геймпада: 0 — смещениями мыши (как пальцем), 1 — осью джойстика
-        get() = p.getInt("padCamera", 0)
-        set(v) { p.edit().putInt("padCamera", v).commit() }
+    // камера правым стиком: 1 — осью джойстика (по умолчанию: плавно, как на консоли; мышь в игре не нужна —
+    // ею водят только курсор в меню и паузе), 0 — смещениями мыши и в игре («как палец», запасной вариант: так
+    // камера не пропадает на Retroid Pocket/GameSir). Ключ новый (padCamera2): у старых сборок в настройках
+    // сохранено padCamera=0, и прежнее значение оставило бы мышь.
+    var padCamera: Int
+        get() = p.getInt("padCamera2", 1)
+        set(v) { p.edit().putInt("padCamera2", v).commit() }
     var cheats: Boolean  // читы: привязки команд в User.ini (host/boot/config.c) и меню «Читы» в игре (Cheats)
         get() = p.getBoolean("cheats", false)
         set(v) { p.edit().putBoolean("cheats", v).commit() }

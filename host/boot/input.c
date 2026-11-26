@@ -231,7 +231,8 @@ static const char g_snx_default[] =
     "Plus=Escape        ; меню - клавишей: открытое с джойстика меню игра рисует без книги\n"
     "B=Ctrl             ; прыжок - клавишей Ctrl, как на ПК: двойной прыжок и лианы (кнопка джойстика Joy2\n"
     ";                    срабатывала через раз). B= (пусто) - снова Joy2 из User.ini\n"
-    "CameraMode=Mouse   ; камера правым стиком: Mouse - как мышь/палец, Joystick - ось JoyU/JoyV\n"
+    "CameraMode=Joystick ; камера правым стиком: Joystick - ось JoyU/JoyV (плавно, в меню и паузе - мышь),\n"
+    ";                    Mouse - смещениями мыши и в игре (как палец)\n"
     "MoveSpeed=1200     ; бег при полном наклоне левого стика (как клавиша W)\n"
     "CameraSpeed=72     ; поворот камеры правым стиком (умножается ещё на скорость мыши из меню игры)\n"
     "InvertCameraY=False\n"
@@ -260,12 +261,15 @@ static int g_layer_btn = -1, g_layer, g_menu;
 static int g_input_frozen;
 static float g_move_speed = 1200.0f, g_cam_speed = 72.0f, g_dead = 0.15f;
 static int g_invert_y;
-// Камера правым стиком: 1 — смещениями мыши DirectInput (как камера пальцем), 0 — осью джойстика JoyU/JoyV.
-// Мышь — основной ввод игры на ПК: у оси джойстика камера на Android «пропадала» (после прыжков по кувшинкам и
-// просто через минуту-две, до захода в меню), у пальца — нет. Скорость: ось V даёт aMouseX = 20·V, мышь —
-// 1,2 на отсчёт в секунду (MouseX: Axis aMouseX Speed=6, ×0,01; UInput::ReadInput ×20/Δt), то есть
-// CameraSpeed 72 ≈ 1200 отсчётов/с при полном наклоне; ещё × «Чувствительность камеры» лаунчера (SNX_LOOK_SENS).
-static int g_cam_mouse = 1;
+// Камера правым стиком. 0 (по умолчанию) — осью джойстика JoyU/JoyV (aMouseX/aMouseY): камера плавная, как на
+// консоли, и в игре мышь не нужна — смещения мыши остаются только меню и паузе, где ими водят курсор (ниже,
+// ветка g_input_frozen). 1 — смещениями мыши DirectInput и в игре (как камера пальцем): так было раньше, но
+// мышь — это скорость, а не положение, и в игре она «дёргается»: 20·Δ/Δt из целых пикселей. Ось можно отключить
+// («Как палец» в лаунчере, Snx.ini CameraMode=Mouse), если камера осью пропадает (Retroid Pocket, GameSir).
+// Скорость: ось V даёт aMouseX = 20·V, мышь — 1,2 на отсчёт в секунду (MouseX: Axis aMouseX Speed=6, ×0,01;
+// UInput::ReadInput ×20/Δt), то есть CameraSpeed 72 ≈ 1200 отсчётов/с при полном наклоне; ещё × «Чувствительность
+// камеры» лаунчера (SNX_LOOK_SENS).
+static int g_cam_mouse;
 // Чувствительность камеры правится на ходу («Настройки» в игре — ползунок без перезапуска): читает поток ввода,
 // пишет UI-поток, поэтому атомарно.
 static _Atomic float g_look_sens = 1.0f;
@@ -1686,8 +1690,10 @@ void input_tick(void)
         // джойстик: lX lY — левый стик, lRy lRz (JoyU, JoyV) — правый; крестовина — POV
         static const int pov_of[16] = {-1, 0, 18000, -1, 27000, 31500, 22500, 27000,
                                        9000, 4500, 13500, 9000, -1, 0, 18000, -1};
-        float ax[6] = {lx * g_move_speed, ly * g_move_speed, 0, 0, rx * g_cam_speed,
-                       (g_invert_y ? -ry : ry) * g_cam_speed};
+        // «Чувствительность камеры» (ползунок лаунчера и шестерёнки) действует в обоих режимах: ось идёт в
+        // aMouseX как есть, поэтому множитель закладываем в значение оси.
+        float cs = g_cam_speed * atomic_load_explicit(&g_look_sens, memory_order_relaxed);
+        float ax[6] = {lx * g_move_speed, ly * g_move_speed, 0, 0, rx * cs, (g_invert_y ? -ry : ry) * cs};
         if (g_cam_mouse) {  // камера — смещениями мыши, как пальцем (см. g_cam_mouse)
             static float cfx, cfy;
             float k = g_cam_speed * (1200.0f / 72.0f) * atomic_load_explicit(&g_look_sens, memory_order_relaxed) * dt;
