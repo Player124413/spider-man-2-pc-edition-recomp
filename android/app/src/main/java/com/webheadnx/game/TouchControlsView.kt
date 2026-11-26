@@ -326,7 +326,13 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
                 down(e.getPointerId(idx), x, y)
             }
             MotionEvent.ACTION_POINTER_DOWN -> down(e.getPointerId(idx), e.getX(idx), e.getY(idx))
-            MotionEvent.ACTION_MOVE -> for (i in 0 until e.pointerCount) move(e.getPointerId(i), e.getX(i), e.getY(i))
+            // Android склеивает быстрые движения в одно событие: в нём несколько «исторических» точек, а не
+            // только последняя. Без них быстрый разворот пальцем терял ход и камера «не докручивалась».
+            MotionEvent.ACTION_MOVE -> {
+                for (h in 0 until e.historySize)
+                    for (i in 0 until e.pointerCount) move(e.getPointerId(i), e.getHistoricalX(i, h), e.getHistoricalY(i, h))
+                for (i in 0 until e.pointerCount) move(e.getPointerId(i), e.getX(i), e.getY(i))
+            }
             MotionEvent.ACTION_POINTER_UP -> up(e.getPointerId(idx), e.getX(idx), e.getY(idx))
             MotionEvent.ACTION_UP -> up(e.getPointerId(idx), e.getX(idx), e.getY(idx))
             MotionEvent.ACTION_CANCEL -> releaseAll()
