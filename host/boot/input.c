@@ -614,6 +614,8 @@ void input_init(const char *user_dir)
         input_set_look_sens((float)atof(ls));
     fprintf(stderr, "[input] right stick camera: %s, speed %.0f, sensitivity %.2f\n", g_cam_mouse ? "mouse" : "joystick",
             (double)g_cam_speed, (double)atomic_load_explicit(&g_look_sens, memory_order_relaxed));
+    // камера пальцем идёт тем же путём, что и стик: осью джойстика (в игре мыши нет) или смещениями мыши
+    fprintf(stderr, "[input] finger camera: %s\n", g_cam_mouse ? "mouse deltas" : "joystick axis (no mouse in game)");
     const char *e = getenv("SNX_SHOW_FPS");  // поверх Snx.ini: лаунчер Android («Счётчик FPS»)
     if (e)
         d3d8_set_fps_overlay(*e == '1');
@@ -1290,6 +1292,9 @@ static pthread_mutex_t g_touch_lock = PTHREAD_MUTEX_INITIALIZER;
 static u32 g_touch_buttons, g_touch_applied;
 static float g_touch_axis[4];
 static float g_look_x, g_look_y;
+// Камера пальцем по пути через ось джойстика: смещение пальца (в отсчётах мыши) за кадр. Писать может UI-поток
+// (touch_tick), читает input_tick — поэтому атомарно.
+static _Atomic float g_cam_px, g_cam_py;
 static struct {
     short vk;
     char down;
@@ -1578,16 +1583,23 @@ static void touch_tick(void)
     g_touch_applied = buttons;
     for (int i = 0; i < nkeys; i++)
         key((u32)vks[i], downs[i]);
-    // камера пальцем: смещение мыши DirectInput (в меню — не нужно, там касание — щелчок)
-    static float rx_, ry_;
+    // Камера пальцем. В игре мышь не участвует: смещение пальца за кадр копится здесь, а input_tick переводит его
+    // в ось джойстика (aMouseX/aMouseY) — та же плавная камера, что у правого стика, только мыши в игре нет совсем.
+    // В меню касание — щелчок курсором, камера там не нужна. Запасной режим «как палец» (g_cam_mouse) шлёт мышь.
     if (!g_input_frozen && (look_x != 0.0f || look_y != 0.0f)) {
-        rx_ += look_x;
-        ry_ += (g_invert_y ? -look_y : look_y);
-        int dx = (int)rx_, dy = (int)ry_;
-        rx_ -= (float)dx;
-        ry_ -= (float)dy;
-        if (dx || dy)
-            dinput8_mouse_move(dx, dy, 0);
+        if (g_cam_mouse) {
+            static float rx_, ry_;
+            rx_ += look_x;
+            ry_ += (g_invert_y ? -look_y : look_y);
+            int dx = (int)rx_, dy = (int)ry_;
+            rx_ -= (float)dx;
+            ry_ -= (float)dy;
+            if (dx || dy)
+                dinput8_mouse_move(dx, dy, 0);
+        } else {
+            atomic_fetch_add_explicit(&g_cam_px, look_x, memory_order_relaxed);
+            atomic_fetch_add_explicit(&g_cam_py, look_y, memory_order_relaxed);
+        }
     }
 }
 
@@ -1694,6 +1706,24 @@ void input_tick(void)
         // aMouseX как есть, поэтому множитель закладываем в значение оси.
         float cs = g_cam_speed * atomic_load_explicit(&g_look_sens, memory_order_relaxed);
         float ax[6] = {lx * g_move_speed, ly * g_move_speed, 0, 0, rx * cs, (g_invert_y ? -ry : ry) * cs};
+        // Камера пальцем по экрану — в ту же ось, что правый стик: смещение пальца за кадр (отсчёты мыши)
+        // переводим в значение оси так же, как это делала игра для мыши (1,2 на отсчёт в секунду), и сглаживаем —
+        // значение живёт несколько кадров, чтобы опрос джойстика игрой не терял короткие импульсы. Мыши в игре нет.
+        if (!g_cam_mouse) {
+            static float camfx, camfy;
+            float tpx = atomic_exchange_explicit(&g_cam_px, 0.0f, memory_order_relaxed);
+            float tpy = atomic_exchange_explicit(&g_cam_py, 0.0f, memory_order_relaxed);
+            if (dt > 0.0f) {
+                camfx = camfx * 0.45f + (1.2f * tpx / dt) * 0.55f;
+                camfy = camfy * 0.45f + (1.2f * tpy / dt) * 0.55f;
+                if (fabsf(camfx) < 0.5f)
+                    camfx = 0.0f;
+                if (fabsf(camfy) < 0.5f)
+                    camfy = 0.0f;
+            }
+            ax[4] += camfx;
+            ax[5] += g_invert_y ? -camfy : camfy;
+        }
         if (g_cam_mouse) {  // камера — смещениями мыши, как пальцем (см. g_cam_mouse)
             static float cfx, cfy;
             float k = g_cam_speed * (1200.0f / 72.0f) * atomic_load_explicit(&g_look_sens, memory_order_relaxed) * dt;
