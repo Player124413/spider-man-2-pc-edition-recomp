@@ -639,6 +639,11 @@ static SDL_AudioStream *g_mov_stream;
 static bink_audio *g_mov_dec;
 static u32 g_mov_owner, g_mov_track, g_mov_next, g_mov_out_rate, g_mov_need;
 static int g_mov_failed;
+static int g_mov_started;  // в очередь этого ролика уже что-то положено
+static u32 g_mov_dry;      // сколько раз очередь успевала опустеть (треск/провалы) — видно в журнале
+// Насколько кадров звук может уйти вперёд картинки. Это запас против «медленных» кадров ролика: раньше звук
+// брался только за уже пройденные кадры, и при кадре дольше буфера очередь пустела — слышно треском.
+#define MOV_LOOKAHEAD 12u
 static float g_mov_gain = 1.0f;
 static s16 g_mov_pcm[0x12000];  // 147456 байт: больше самого большого аудиопакета Bink (145920)
 
@@ -652,6 +657,7 @@ static void movie_audio_reset(void)
     bink_audio_free(g_mov_dec);
     g_mov_dec = NULL;
     g_mov_owner = 0;
+    g_mov_started = 0;
     if (g_mov_dev)
         SDL_ClearQueuedAudio(g_mov_dev);
 }
@@ -683,7 +689,7 @@ static int movie_audio_open(void)
     want.freq = 48000;
     want.format = AUDIO_S16SYS;
     want.channels = 2;
-    want.samples = 1024;
+    want.samples = 2048;
     g_mov_dev = SDL_OpenAudioDevice(NULL, 0, &want, &have, SDL_AUDIO_ALLOW_FREQUENCY_CHANGE);
     if (!g_mov_dev) {
         g_mov_failed = 1;
@@ -692,7 +698,7 @@ static int movie_audio_open(void)
     }
     SDL_PauseAudioDevice(g_mov_dev, 0);
     g_mov_out_rate = have.freq ? (u32)have.freq : (u32)want.freq;
-    g_mov_need = g_mov_out_rate * 4u / 3u;  // ~330 мс стерео 16 бит в очереди
+    g_mov_need = g_mov_out_rate * 2u;  // ~500 мс стерео 16 бит: ролик может «задуматься» на кадре — звук не рвётся
     const char *vol = getenv("SNX_MOVIE_VOL");  // громкость роликов, доля от исходной
     if (vol && atof(vol) > 0.0)
         g_mov_gain = (float)atof(vol) > 2.0f ? 2.0f : (float)atof(vol);
@@ -721,6 +727,7 @@ static int movie_audio_begin(bink *b)
     g_mov_owner = b->obj;
     g_mov_track = 0;
     g_mov_next = 0;
+    g_mov_dry = 0;
     fprintf(stderr, "[bink] movie sound: track 0 %u Hz x%u by the port -> SDL %u Hz x2\n", b->rate[0], ch,
             g_mov_out_rate);
     return 1;
@@ -736,27 +743,50 @@ static void movie_audio_pump(bink *b)
             return;
     if (!movie_audio_begin(b))
         return;
-    if (g_mov_next > b->frame || b->frame - g_mov_next > 90u) {  // перемотка или конец ролика
+    // Перемотка (BinkGoto) и конец ролика (кадры пошли с начала). Обычное упреждение сбросом НЕ считается:
+    // здесь была ошибка первой версии — звук разрешалось брать только за уже пройденные кадры, поэтому сразу
+    // после BinkNextFrame «следующий кадр» оказывался впереди текущего, и каждый вызов отрисовки глушил
+    // декодер вместе с очередью. Отсюда и треск: декодер терял плавный переход между блоками.
+    if (g_mov_next > b->frame + MOV_LOOKAHEAD || b->frame > g_mov_next + 90u) {
         bink_audio_reset(g_mov_dec);
         SDL_ClearQueuedAudio(g_mov_dev);
         g_mov_next = b->frame;
+        g_mov_started = 0;
     }
     u32 queued = SDL_GetQueuedAudioSize(g_mov_dev);
-    while (queued < g_mov_need && g_mov_next <= b->frame && g_mov_next < b->frames) {
+    if (g_mov_started && !queued && g_mov_next < b->frames && g_mov_next >= 2u)
+        g_mov_dry++;  // очередь успела опустеть — в журнале видно, если провалы ещё остались
+    u32 limit = b->frames ? b->frames - 1u : 0;  // дальше последнего кадра звука нет
+    if (b->frame + MOV_LOOKAHEAD < limit)
+        limit = b->frame + MOV_LOOKAHEAD;
+    while (queued < g_mov_need && g_mov_next <= limit) {
+        u32 f = g_mov_next;
         u32 n = 0;
-        const u8 *p = audio_packet(b, g_mov_next++, g_mov_track, &n);
-        if (!p || n < 5u)
+        const u8 *p = audio_packet(b, f, g_mov_track, &n);
+        if (!p || n < 5u) {
+            g_mov_next = f + 1u;
             continue;
-        u32 bytes = le32(p);
-        if (bytes > sizeof g_mov_pcm)
-            bytes = (u32)sizeof g_mov_pcm;
-        u32 got = bytes >= 2u ? bink_audio_decode(g_mov_dec, p + 4, n - 4u, g_mov_pcm, bytes / 2u) : 0;
-        if (!got)
+        }
+        // Кадр звука длится ровно столько, сколько заявлено в его заголовке (первый dword): декодер может дать
+        // меньше (и лишний хвост блока в последнем кадре) — добиваем/отрезаем тишиной, иначе часы звука уезжают
+        // от картинки и раз в несколько секунд очередь пустеет.
+        u32 decl = le32(p);
+        u32 want = (b->flags[g_mov_track] & 0x4000) ? decl / 2u : decl;  // 16 бит — decl это байты, 8 бит — отсчёты
+        if (want > (u32)(sizeof g_mov_pcm / 2u))
+            want = (u32)(sizeof g_mov_pcm / 2u);
+        u32 got = want ? bink_audio_decode(g_mov_dec, p + 4, n - 4u, g_mov_pcm, want) : 0;
+        g_mov_next = f + 1u;
+        if (f < 2u)  // видно в журнале: совпадает ли декодированное с заявленным размером кадра
+            fprintf(stderr, "[bink] movie sound: frame %u declares %u (%s), decoded %u samples\n", f, decl,
+                    (b->flags[g_mov_track] & 0x4000) ? "bytes, 16 bit" : "samples, 8 bit", got);
+        if (!want)
             continue;
+        if (got < want)
+            memset(g_mov_pcm + got, 0, (size_t)(want - got) * sizeof *g_mov_pcm);
         if (g_mov_gain != 1.0f)
-            for (u32 i = 0; i < got; i++)
+            for (u32 i = 0; i < want; i++)
                 g_mov_pcm[i] = (s16)(g_mov_pcm[i] * g_mov_gain);
-        if (SDL_AudioStreamPut(g_mov_stream, g_mov_pcm, (int)(got * 2u)) != 0)
+        if (SDL_AudioStreamPut(g_mov_stream, g_mov_pcm, (int)(want * 2u)) != 0)
             break;
         int avail;
         while ((avail = SDL_AudioStreamAvailable(g_mov_stream)) > 0) {
@@ -767,6 +797,7 @@ static void movie_audio_pump(bink *b)
             if (SDL_QueueAudio(g_mov_dev, out, (Uint32)k) != 0)
                 break;
         }
+        g_mov_started = 1;
         queued = SDL_GetQueuedAudioSize(g_mov_dev);
     }
 }
@@ -775,6 +806,7 @@ static void movie_audio_stop(bink *b)
 {
     if (!b || !g_mov_dev || g_mov_owner != b->obj)
         return;
+    fprintf(stderr, "[bink] movie sound: %u dry spell(s) in the queue\n", g_mov_dry);
     movie_audio_reset();
 }
 #endif  // SNX_HEADLESS
