@@ -17,8 +17,9 @@ import kotlin.math.max
 import kotlin.math.min
 
 // Экранное управление поверх игры (и редактор раскладки). Один полноэкранный View разбирает все пальцы сам:
-// элементы (кнопки, стики, крестовина) -> виртуальный геймпад (SnxNative.pad), палец на свободном месте — камера
-// (SnxNative.look). Кнопки «скользят»: палец, переехавший с кнопки на соседнюю, отпускает первую и жмёт вторую.
+// элементы (кнопки, стики, крестовина) -> виртуальный геймпад (SnxNative.pad), палец на свободном месте — камера:
+// это плавающий правый стик (центр там, где коснулись; отклонение пальца — скорость поворота, как у геймпада).
+// Кнопки «скользят»: палец, переехавший с кнопки на соседнюю, отпускает первую и жмёт вторую.
 // В GUI-меню игры элементы прячутся. В главном меню на Bink-заставке касания пустого места идут в SDL,
 // но кнопки остаются видимыми: именно A/крестовина выбирают «Начать новую игру», «Загрузить игру», «Настройки».
 // Рисуется только при изменениях (без постоянной перерисовки — не тратит GPU и батарею).
@@ -83,6 +84,18 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
                          var startX: Float = 0f, var startY: Float = 0f, var combo: Boolean = false)
     private val fingers = HashMap<Int, Finger>()
 
+    // Камера пальцем — плавающий аналоговый стик. Раньше палец отдавал смещение (сколько провёл — столько
+    // повернулось): прицеливаться этим нельзя, каждый кадр это рывок на десяток пикселей. Теперь касание пустого
+    // места ставит центр стика под палец, а отклонение пальца от центра — это наклон правого стика (ось JoyU/JoyV):
+    // камера крутится ровно с той скоростью, насколько отклонил палец, и стоит, пока палец держат, — можно целиться
+    // мелко (у центра) и резко разворачиваться (за край радиуса).
+    private var lookPointer = -1
+    private var lookCX = 0f
+    private var lookCY = 0f
+    private var lookX = 0f  // отклонение -1..1 (как у стика)
+    private var lookY = 0f
+    private fun lookRadius() = 0.15f * h()  // радиус полного отклонения (доля высоты экрана)
+
     private class StickState(var pointer: Int = -1, var cx: Float = 0f, var cy: Float = 0f, var vx: Float = 0f, var vy: Float = 0f)
     private val sticks = HashMap<String, StickState>()
     private val latched = HashSet<String>()      // залипшие кнопки (toggle)
@@ -140,6 +153,12 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
             }
         }
         if (!editMode) {
+            if (lookPointer >= 0) {
+                // центр стика камеры под пальцем и его отклонение — видно, с какой силой идёт поворот
+                val r = lookRadius() * 0.6f
+                WebIcons.drawStick(canvas, lookCX, lookCY, r, lookCX + lookX * r * 0.6f, lookCY + lookY * r * 0.6f,
+                    true, alpha(settings.opacity))
+            }
             drawGear(canvas)
             if (mouseX >= 0f && menuActive()) drawMouseCursor(canvas)
         }
@@ -400,7 +419,16 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
                 f.bind = Bind.CONTROL
                 f.ctl = fs
                 startStick(fs, id, x, y, x, y)
-            } else f.bind = Bind.LOOK
+            } else {
+                f.bind = Bind.LOOK
+                if (lookPointer < 0) {  // второй палец на пустом месте центр стика камеры не переставляет
+                    lookPointer = id
+                    lookCX = x
+                    lookCY = y
+                    lookX = 0f
+                    lookY = 0f
+                }
+            }
         }
         invalidate()
     }
@@ -415,8 +443,18 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
                 SnxNative.mouse(x / max(1f, w()), y / max(1f, h()), -1)
             }
             Bind.LOOK -> {
-                val k = settings.lookSensitivity * 1000f / max(1f, h())
-                SnxNative.look((x - f.lastX) * k, (y - f.lastY) * k)
+                if (id != lookPointer) return  // центр стика ставит первый палец, остальные его не двигают
+                val r = lookRadius()
+                var dx = (x - lookCX) / r
+                var dy = (y - lookCY) / r
+                val m = hypot(dx, dy)
+                if (m > 1f) {  // палец за радиусом — полный наклон, центр стоит на месте
+                    dx /= m
+                    dy /= m
+                }
+                lookX = dx
+                lookY = dy
+                invalidate()
             }
             Bind.CONTROL -> {
                 val c = f.ctl!!
@@ -453,6 +491,11 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
                 SnxNative.mouse(x / max(1f, w()), y / max(1f, h()), 2)
             invalidate()
             return
+        }
+        if (f.bind == Bind.LOOK && lookPointer == id) {
+            lookPointer = -1
+            lookX = 0f
+            lookY = 0f
         }
         if (f.bind == Bind.GEAR && onGearAt(x, y)) onGear?.invoke()
         if (f.bind == Bind.SLOT) slotFlash = 0
@@ -537,6 +580,9 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
             if (f.bind == Bind.MENU_TAP) SnxNative.mouse(f.lastX / max(1f, w()), f.lastY / max(1f, h()), -1)
         fingers.clear()
         sticks.values.forEach { it.pointer = -1; it.vx = 0f; it.vy = 0f }
+        lookPointer = -1
+        lookX = 0f
+        lookY = 0f
         dpadMask = 0
         slotFlash = 0
         if (!editMode) {
@@ -571,6 +617,11 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
             val o = if (c.rightStick) 2 else 0
             if (abs(st.vx) > abs(ax[o])) ax[o] = st.vx
             if (abs(st.vy) > abs(ax[o + 1])) ax[o + 1] = st.vy
+        }
+        // камера пальцем — та же правая ось, что у правого стика раскладки (берём большее отклонение)
+        if (lookPointer >= 0) {
+            if (abs(lookX) > abs(ax[2])) ax[2] = lookX
+            if (abs(lookY) > abs(ax[3])) ax[3] = lookY
         }
         // Spider-Man 2 иногда игнорирует JoyY (влево/вправо через JoyX работает). Дублируем перед/назад
         // клавишами W/S с гистерезисом, чтобы не дребезжать у порога. Ось при этом остаётся аналоговой.

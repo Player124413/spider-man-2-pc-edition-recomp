@@ -19,13 +19,6 @@ JNIEXPORT void JNICALL JNI_FN(pad)(JNIEnv *env, jclass cls, jint buttons, jfloat
     touch_pad((uint32_t)buttons, lx, ly, rx, ry);
 }
 
-JNIEXPORT void JNICALL JNI_FN(look)(JNIEnv *env, jclass cls, jfloat dx, jfloat dy)
-{
-    (void)env;
-    (void)cls;
-    touch_look(dx, dy);
-}
-
 JNIEXPORT void JNICALL JNI_FN(key)(JNIEnv *env, jclass cls, jint vk, jboolean down)
 {
     (void)env;

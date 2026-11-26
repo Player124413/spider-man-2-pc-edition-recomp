@@ -27,7 +27,6 @@ object SnxNative {
     const val STATE_IN_GAME = 8    // в мире есть живой герой: палец по пустому месту — камера, вне игры — мышь
 
     @JvmStatic external fun pad(buttons: Int, lx: Float, ly: Float, rx: Float, ry: Float)
-    @JvmStatic external fun look(dx: Float, dy: Float)
     @JvmStatic external fun key(vk: Int, down: Boolean)
     @JvmStatic external fun state(): Int
     // главное меню на Bink-заставке: касания идут в обработчик кликов, экранные кнопки прячутся
