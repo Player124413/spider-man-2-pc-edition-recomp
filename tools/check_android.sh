@@ -19,6 +19,7 @@ check "тап в мышь только вне игры" "grep -q 'g_touch_in_gam
 check "порог тапа 24 dp" "grep -qF '24f * density' '$ROOT/android/app/src/main/java/com/webheadnx/game/TouchControlsView.kt'"
 check "настройки камеры в шестерёнке" "grep -q 'settingsMenu()' '$ROOT/android/app/src/main/java/com/webheadnx/game/GameActivity.kt' && grep -q 'Чувствительность камеры' '$ROOT/android/app/src/main/java/com/webheadnx/game/GameActivity.kt'"
 check "specular-туман без specular — без тумана" "grep -qF '(k->inputs & (1u << 6)) ? \"v_col1.a\" : \"1.0\"' '$ROOT/runtime/hle/d3d8_ff.c'"
+check "самодиагностика картинки в логе" "grep -q 'g_diag_variant' '$ROOT/runtime/hle/d3d8_ff.c' && grep -qF '[diag] sweep:' '$ROOT/runtime/hle/d3d8_ff.c' && grep -qF 'webheadNX build' '$ROOT/host/boot/main.c' && grep -q 'SNX_DIAG_AUTO' '$ROOT/runtime/hle/d3d8_ff.c'"
 check "диагностика кадра" "grep -q 'void d3d8_set_diag' '$ROOT/runtime/hle/d3d8_ff.c' && grep -q 'JNI_FN(diag)' '$ROOT/host/boot/android.c' && grep -q 'external fun diag' '$ROOT/android/app/src/main/java/com/webheadnx/game/SnxNative.kt' && grep -qF 'Диагностика кадра' '$ROOT/android/app/src/main/java/com/webheadnx/game/GameActivity.kt'"
 check "texgen SPHEREMAP" "grep -q 'SPHEREMAP' '$ROOT/runtime/hle/d3d8_ff.c' && grep -q '(t\[11\] >> 16) & 7' '$ROOT/runtime/hle/d3d8_ff.c'"
 check "ролики растянуты на весь кадр" "grep -q 'glBlitFramebuffer(0, 0, mw, mh, 0, 0, W, H' '$ROOT/runtime/hle/d3d8_res.c' && grep -q 'glBlitFramebuffer(0, 0, (GLint)q->w, (GLint)q->h, 0, 0, W, H' '$ROOT/runtime/hle/d3d8_ff.c'"

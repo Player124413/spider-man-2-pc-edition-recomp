@@ -132,6 +132,24 @@ typedef struct {
 // диагностика кадра (ниже): пишем состояние первых отрисовок кадра, показываем поверх картинки
 static void diag_record(const d3d_rstate *r, const ffkey *k);
 static _Atomic u32 g_diag_clear;  // последний цвет заливки заднего буфера (пишет x_clear)
+// Самодиагностика картинки: раз в DIAG_ROT кадров включается один отладочный вариант состояния (0 — как есть,
+// 1 — туман розовый, 2 — без texgen, 3 — TextureFactor белый, 4 — стадия 0 только текстура). По строке «[diag]»
+// в логе видно, какой вариант меняет цвет неба, — причина находится по одному прогону. Варианты, меняющие только
+// uniform'ы (1 и 3), не требуют новых программ; 2 и 4 собирают по одной программе на материал.
+#define DIAG_ROT 40
+#define DIAG_VARIANTS 5
+static _Atomic int g_diag_variant;
+
+static void diag_sweep_note(void)
+{
+    static int done;
+    if (done)
+        return;
+    done = 1;
+    fprintf(stderr,
+            "[diag] sweep: v0 как есть, v1 туман розовый, v2 без texgen, v3 TextureFactor белый, "
+            "v4 стадия 0 = только текстура; каждые %d кадров строка [diag] с цветом полос кадра\n", DIAG_ROT);
+}
 
 typedef struct {
     ffkey key;
@@ -263,10 +281,18 @@ static void make_key(const d3d_rstate *d, const vdecl *decl, ffkey *k)
             sk->aa2 = (u8)t[6];
             sk->aa0 = (u8)t[27];
             sk->res = (u8)(t[28] == 5);  // RESULTARG: TEMP
+            if (g_diag_variant == 4 && s == 0) {  // вариант самодиагностики: cur = текстура
+                sk->cop = 2;  // D3DTOP_SELECTARG1
+                sk->ca1 = 2;  // D3DTA_TEXTURE
+                sk->aop = 2;
+                sk->aa1 = 2;
+            }
         }
         sk->tex = d->tex[s] ? (u8)(d->tex[s]->cube ? 2 : 1) : 0;
         sk->tci = (u8)(t[11] & 7);
         sk->tcgen = (u8)((t[11] >> 16) & 7);  // 1..4: NORMAL, POSITION, REFLECTION, SPHEREMAP
+        if (g_diag_variant == 2)
+            sk->tcgen = 0;  // вариант самодиагностики: координаты только из вершины
         sk->ttf_count = (u8)(t[24] & 7);
         sk->ttf_proj = (t[24] & 0x100) != 0;
         nst = s + 1;
@@ -1314,10 +1340,17 @@ static void upload_uniforms(d3d_rstate *d, ffprog *p)
         float c[4];
         if (p->u_tfactor >= 0) {
             color4(c, d->rs[60]);
+            if (g_diag_variant == 3)  // вариант самодиагностики: TextureFactor белый
+                c[0] = c[1] = c[2] = c[3] = 1.0f;
             glUniform4fv(p->u_tfactor, 1, c);
         }
         if (p->u_fogcolor >= 0) {
             color4(c, d->rs[34]);
+            if (g_diag_variant == 1) {  // вариант самодиагностики: туман розовый — видно, что закрашено туманом
+                c[0] = 1.0f;
+                c[1] = 0.0f;
+                c[2] = 1.0f;
+            }
             glUniform4fv(p->u_fogcolor, 1, c);
         }
         if (p->u_ambient >= 0) {
@@ -2614,6 +2647,14 @@ typedef struct {
 } diag_strip_args;
 
 // Полоса заднего буфера: доминирующий цвет грубой сеткой 4 бита на канал (4096 ячеек), затем среднее по ней
+// Смена отладочного варианта: ключи программ кешируются, поэтому просим поток рендера собрать их заново
+static void x_diag_invalidate(void *arg)
+{
+    d3d_rstate *r = &(*(d3ddev **)arg)->r;
+    r->key_dirty = 1;
+    r->gen_const++;
+}
+
 static void x_diag_strip(void *arg)
 {
     diag_strip_args *a = arg;
@@ -3195,6 +3236,40 @@ void d3d8_present(d3ddev *d)
         d->gamma_dirty = 0;
     }
     cs_async(x_present_pass, &pa, sizeof pa);
+    // Самодиагностика картинки: раз в DIAG_ROT кадров печатаем в лог доминирующий цвет двух полос кадра и
+    // переключаем отладочный вариант (см. diag_sweep_note). Один прогон показывает, что именно красит небо.
+    static int sweep_on = -1;
+    if (sweep_on < 0) {
+        const char *e = getenv("SNX_DIAG_AUTO");
+        sweep_on = !(e && *e == '0');
+        if (sweep_on)
+            diag_sweep_note();
+    }
+    // только в игре: в меню и в роликах кадров мало (1–6 отрисовок), а неба там не видно
+    // один круг вариантов при старте игры (чтобы не мигало всё время); с включённым «Диагностика кадра» — по кругу
+    static int sweep_state;  // 0 — ждём игру, 1 — идём по вариантам, 2 — готово
+    if (sweep_on && sweep_state == 0 && d->draws >= 20)
+        sweep_state = 1;
+    if (sweep_on && sweep_state == 1 && w > 0 && h > 0 && d->draws >= 20 && d->frame % DIAG_ROT == DIAG_ROT - 1) {
+        diag_strip_args s1 = {d, 0.86f, 0, 0, 0, 0}, s2 = {d, 0.68f, 0, 0, 0, 0};
+        cs_sync(x_diag_strip, &s1);
+        cs_sync(x_diag_strip, &s2);
+        fprintf(stderr,
+                "[diag] v=%d top=%02X%02X%02X %d%% mid=%02X%02X%02X %d%% clear=%08X fog=%08X frame=%d draws=%u\n",
+                (int)g_diag_variant, (s1.rgb >> 16) & 0xFF, (s1.rgb >> 8) & 0xFF, s1.rgb & 0xFF, s1.pct,
+                (s2.rgb >> 16) & 0xFF, (s2.rgb >> 8) & 0xFF, s2.rgb & 0xFF, s2.pct,
+                atomic_load_explicit(&g_diag_clear, memory_order_relaxed), d->r.rs[34], d->frame, d->draws);
+        int nv = (int)g_diag_variant + 1;
+        if (nv >= DIAG_VARIANTS) {  // круг закончен: обычная отрисовка (и стоп, если окно диагностики не включено)
+            nv = 0;
+            if (!d3d8_diag()) {
+                sweep_state = 2;
+                fprintf(stderr, "[diag] sweep done\n");
+            }
+        }
+        atomic_store(&g_diag_variant, nv);
+        cs_cmd_push(x_diag_invalidate, &d, sizeof d);  // команды идут по порядку: следующий кадр соберёт ключи заново
+    }
     // Диагностика кадра («Настройки» → «Диагностика кадра»): две полосы заднего буфера читаем на Core 2 до гаммы
     // Present, текст показываем в слое порта ниже — по скриншоту видно, откуда цвет: Clear, туман, TextureFactor
     // или стадии текстуры (d0 — первая отрисовка кадра, обычно небо).

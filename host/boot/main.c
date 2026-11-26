@@ -715,6 +715,9 @@ int main(int argc, char **argv)
 #else
     atexit(boot_shutdown);
 #endif
+    // метка сборки: по логу видно, какая версия порта запущена (время сборки модуля)
+    fprintf(stderr, "[boot] webheadNX build %s %s, diag sweep %s\n", __DATE__, __TIME__,
+            getenv("SNX_DIAG_AUTO") && *getenv("SNX_DIAG_AUTO") == '0' ? "off" : "on");
     if (g_res_w > 0)
         user32_set_screen(g_res_w, g_res_h);
     input_init(g_user);
