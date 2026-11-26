@@ -51,7 +51,7 @@ class LauncherActivity : Activity() {
         Updater.checkAndAsk(this, s, auto = true)  // новый выпуск на GitHub — «Скачать» / «Позже»
     }
 
-    // окно «О порте»: CreditsDialog (автор, Telegram-канал, благодарность репозиторию webheadNX)
+    // окно «О порте»: CreditsDialog (автор, Telegram-канал; в цветах Человека-паука)
     private fun showCredits() = CreditsDialog.show(this)
 
     override fun onResume() {

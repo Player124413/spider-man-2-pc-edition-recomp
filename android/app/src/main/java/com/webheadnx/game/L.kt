@@ -12,7 +12,7 @@ object L {
 
     private val RU_LANGS = setOf("ru", "be", "kk")
 
-    // автор порта и благодарность (лаунчер: окно при первом запуске и кнопка «О порте»)
+    // автор порта и автор дизайна окна (лаунчер: окно при первом запуске и кнопка «О порте»)
     const val AUTHOR = "Player1444"
     const val TG_CHANNEL = "https://t.me/player1444ports"
     const val UPSTREAM = "https://github.com/Player124413/Shrek2-android_edition"

@@ -18,9 +18,6 @@ import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.text.SpannableStringBuilder
 import android.text.Spanned
-import android.text.TextPaint
-import android.text.method.LinkMovementMethod
-import android.text.style.ClickableSpan
 import android.text.style.ForegroundColorSpan
 import android.text.style.StyleSpan
 import android.view.Gravity
@@ -32,19 +29,21 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 
-// Окно «О порте» (первый запуск, обновление, кнопка «О порте»): тёмно-зелёная карточка с тонкой зелёной рамкой,
-// сверху на рамке — зелёный значок с головой огра; заголовок, автор порта, Telegram-канал, благодарность
-// репозиторию webheadNX и автору дизайна окна (@base64E), кнопки «OK» / «Открыть канал». Строки — по языку телефона (L.t).
+// Окно «О порте» (первый запуск, обновление, кнопка «О порте»): компактная карточка в цветах Человека-паука
+// (тёмно-синий фон, красная рамка и красный значок с маской), сверху на рамке — значок; заголовок, автор порта,
+// Telegram-канал, благодарность автору дизайна окна (@base64E), кнопки «OK» / «Открыть канал». Строки — по языку (L.t).
 object CreditsDialog {
-    private const val CARD_BG = 0xFF111A0E.toInt()
-    private const val CARD_LINE = 0xFF34501C.toInt()
-    private const val BOX_GREEN = 0xFF1C2C12.toInt()
-    private const val BOX_GREEN_LINE = 0xFF3D5F1F.toInt()
-    private const val BOX_DARK = 0xFF172117.toInt()
-    private const val BOX_DARK_LINE = 0xFF233022.toInt()
-    private const val GREY = 0xFF9AA595.toInt()
-    private const val GREEN = 0xFF9BCB3C.toInt()
-    private const val BTN_TEXT = 0xFF0E1508.toInt()
+    // цвета Человека-паука: красный костюм и синий
+    private const val CARD_BG = 0xFF101828.toInt()
+    private const val CARD_LINE = 0xFF8C1319.toInt()
+    private const val BOX_BLUE = 0xFF16213C.toInt()
+    private const val BOX_BLUE_LINE = 0xFF345991.toInt()
+    private const val BOX_DARK = 0xFF131B2E.toInt()
+    private const val BOX_DARK_LINE = 0xFF232F4A.toInt()
+    private const val GREY = 0xFFA8B2C8.toInt()
+    private const val BLUE = 0xFF7FB0FF.toInt()
+    private const val RED = 0xFFFF5A5F.toInt()
+    private const val BTN_TEXT = 0xFFF4F7FF.toInt()
 
     fun show(act: Activity) {
         fun dp(v: Float) = Ui.dp(act, v)
@@ -62,145 +61,114 @@ object CreditsDialog {
             orientation = LinearLayout.VERTICAL
             background = GradientDrawable().apply {
                 setColor(CARD_BG)
-                cornerRadius = dp(22f).toFloat()
-                setStroke(dp(1.5f), CARD_LINE)
+                cornerRadius = dp(16f).toFloat()
+                setStroke(dp(1.2f), CARD_LINE)
             }
-            setPadding(dp(16f), dp(36f), dp(16f), dp(8f))
+            setPadding(dp(12f), dp(26f), dp(12f), dp(6f))
         }
-        // заголовок: «Spider-Man 2» белым жирным, « · webheadNX Android» зелёным
+        // заголовок: «Spider-Man 2» белым жирным, « · webheadNX Android» синим
         card.addView(TextView(act).apply {
             val sb = SpannableStringBuilder()
             sb.append("Spider-Man 2", StyleSpan(Typeface.BOLD), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             val st = sb.length
             sb.append(" · webheadNX Android")
-            sb.setSpan(ForegroundColorSpan(GREEN), st, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            sb.setSpan(ForegroundColorSpan(BLUE), st, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             text = sb
             setTextColor(Color.WHITE)
-            textSize = 18f
+            textSize = 15.5f
             gravity = Gravity.CENTER
-        }, lp(bottom = dp(10f)))
+        }, lp(bottom = dp(7f)))
 
-        // автор
+        // автор порта: имя красным жирным
         card.addView(TextView(act).apply {
             val sb = SpannableStringBuilder(L.t("Android-порт сделан ", "Android port by "))
             val st = sb.length
             sb.append(L.AUTHOR)
             sb.setSpan(StyleSpan(Typeface.BOLD), st, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-            sb.setSpan(ForegroundColorSpan(GREEN), st, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            sb.setSpan(ForegroundColorSpan(RED), st, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             text = sb
             setTextColor(Color.WHITE)
-            textSize = 14f
+            textSize = 12.5f
             gravity = Gravity.CENTER
-            background = box(act, BOX_GREEN, BOX_GREEN_LINE)
-            setPadding(dp(10f), dp(8f), dp(10f), dp(8f))
-        }, lp(bottom = dp(8f)))
+            background = box(act, BOX_BLUE, BOX_BLUE_LINE)
+            setPadding(dp(8f), dp(6f), dp(8f), dp(6f))
+        }, lp(bottom = dp(6f)))
 
-        // Telegram-канал: 📢, подпись капсом, ссылка; нажатие — открыть канал
+        // Telegram-канал: 📢, подпись капсом, ссылка синим; нажатие — открыть канал
         val tg = LinearLayout(act).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             background = box(act, BOX_DARK, BOX_DARK_LINE)
-            setPadding(dp(12f), dp(7f), dp(12f), dp(7f))
+            setPadding(dp(9f), dp(5f), dp(9f), dp(5f))
             isClickable = true
             setOnClickListener { openChannel() }
         }
-        tg.addView(TextView(act).apply { text = "📢"; textSize = 20f }, LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { rightMargin = dp(10f) })
+        tg.addView(TextView(act).apply { text = "📢"; textSize = 16f }, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { rightMargin = dp(8f) })
         val tgText = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
         tgText.addView(TextView(act).apply {
             text = L.t("TELEGRAM-КАНАЛ", "TELEGRAM CHANNEL")
             setTextColor(GREY)
-            textSize = 10f
+            textSize = 9f
             letterSpacing = 0.08f
         })
         tgText.addView(TextView(act).apply {
             text = L.TG_CHANNEL.removePrefix("https://")
-            setTextColor(GREEN)
-            textSize = 14f
+            setTextColor(BLUE)
+            textSize = 12f
             setTypeface(typeface, Typeface.BOLD)
         })
         tg.addView(tgText)
-        card.addView(tg, lp(bottom = dp(8f)))
+        card.addView(tg, lp(bottom = dp(6f)))
 
-        // благодарность: ссылка на репозиторий — зелёная жирная, нажимается
-        card.addView(TextView(act).apply {
-            val link = L.UPSTREAM.removePrefix("https://")
-            val sb = SpannableStringBuilder(L.t("Огромное спасибо репозиторию ", "Huge thanks to the "))
-            val st = sb.length
-            sb.append(link)
-            sb.setSpan(object : ClickableSpan() {
-                override fun onClick(widget: View) {
-                    try {
-                        act.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(L.UPSTREAM)))
-                    } catch (e: Exception) {
-                    }
-                }
-
-                override fun updateDrawState(ds: TextPaint) {
-                    ds.color = GREEN
-                    ds.isFakeBoldText = true
-                    ds.isUnderlineText = false
-                }
-            }, st, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-            sb.append(L.t(" — без него Android-порта бы не существовало.",
-                " repository — without it the Android port would not exist."))
-            text = sb
-            setTextColor(GREY)
-            textSize = 12.5f
-            setLineSpacing(0f, 1.1f)
-            movementMethod = LinkMovementMethod.getInstance()
-            highlightColor = Color.TRANSPARENT
-            setPadding(dp(4f), 0, dp(4f), 0)
-        }, lp(bottom = dp(8f)))
-
-        // благодарность за дизайн окна: ник — зелёный жирный
+        // благодарность за дизайн окна: ник — красный жирный
         card.addView(TextView(act).apply {
             val sb = SpannableStringBuilder(L.t("Спасибо ", "Thanks to "))
             val st = sb.length
             sb.append(L.DESIGNER)
             sb.setSpan(StyleSpan(Typeface.BOLD), st, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-            sb.setSpan(ForegroundColorSpan(GREEN), st, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            sb.setSpan(ForegroundColorSpan(RED), st, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             sb.append(L.t(" за редизайн всплывающего окна.", " for the redesign of this pop-up window."))
             text = sb
             setTextColor(GREY)
-            textSize = 12.5f
-            setPadding(dp(4f), 0, dp(4f), 0)
-        }, lp(bottom = dp(8f)))
+            textSize = 11f
+            setPadding(dp(4f), 0, dp(4f), dp(2f))
+        }, lp(bottom = dp(6f)))
 
         // разделитель
         card.addView(View(act).apply { setBackgroundColor(BOX_DARK_LINE) },
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1f)).apply { bottomMargin = dp(4f) })
 
-        // кнопки: «OK» — текстом, «Открыть канал» — зелёная «таблетка» со значком Telegram
+        // кнопки: «OK» — текстом, «Открыть канал» — красная «таблетка» со значком Telegram
         val buttons = LinearLayout(act).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL or Gravity.END
         }
         buttons.addView(TextView(act).apply {
             text = "OK"
-            setTextColor(0xFFB8C2B0.toInt())
-            textSize = 13f
+            setTextColor(0xFFB6C0D4.toInt())
+            textSize = 12f
             setTypeface(typeface, Typeface.BOLD)
             gravity = Gravity.CENTER
-            setPadding(dp(16f), dp(8f), dp(16f), dp(8f))
+            setPadding(dp(12f), dp(6f), dp(12f), dp(6f))
             isClickable = true
             setOnClickListener { d.dismiss() }
-        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { rightMargin = dp(8f) })
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { rightMargin = dp(6f) })
         buttons.addView(TextView(act).apply {
             text = L.t("ОТКРЫТЬ КАНАЛ", "OPEN CHANNEL")
             setTextColor(BTN_TEXT)
-            textSize = 12f
+            textSize = 11f
             setTypeface(typeface, Typeface.BOLD)
             letterSpacing = 0.03f
             gravity = Gravity.CENTER
-            val ic = TelegramIcon(dp(16f))
+            val ic = TelegramIcon(dp(14f))
             setCompoundDrawablesRelative(ic, null, null, null)
-            compoundDrawablePadding = dp(7f)
-            background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(0xFFA6D650.toInt(), 0xFF6E9E26.toInt())).apply {
-                cornerRadius = dp(20f).toFloat()
+            compoundDrawablePadding = dp(6f)
+            background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(0xFFFF5B60.toInt(), 0xFFAE1220.toInt())).apply {
+                cornerRadius = dp(16f).toFloat()
             }
-            elevation = dp(4f).toFloat()
-            setPadding(dp(14f), dp(8f), dp(16f), dp(8f))
+            elevation = dp(2f).toFloat()
+            setPadding(dp(11f), dp(6f), dp(13f), dp(6f))
             isClickable = true
             setOnClickListener { openChannel(); d.dismiss() }
         })
@@ -209,9 +177,9 @@ object CreditsDialog {
         // значок поверх верхней рамки карточки
         val frame = FrameLayout(act).apply { clipChildren = false; clipToPadding = false }
         frame.addView(card, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-            topMargin = dp(28f)
+            topMargin = dp(21f)
         })
-        frame.addView(Badge(act), FrameLayout.LayoutParams(dp(62f), dp(62f), Gravity.TOP or Gravity.CENTER_HORIZONTAL))
+        frame.addView(Badge(act), FrameLayout.LayoutParams(dp(46f), dp(46f), Gravity.TOP or Gravity.CENTER_HORIZONTAL))
 
         // в альбомной ориентации окно может не влезть по высоте — прокрутка
         val scroll = ScrollView(act).apply {
@@ -225,7 +193,7 @@ object CreditsDialog {
         d.window?.let { w ->
             w.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
             val m = act.resources.displayMetrics
-            val width = minOf((m.widthPixels * 0.9f).toInt(), dp(340f))
+            val width = minOf((m.widthPixels * 0.86f).toInt(), dp(300f))
             w.setLayout(width, ViewGroup.LayoutParams.WRAP_CONTENT)
             w.setDimAmount(0.75f)
         }
@@ -237,11 +205,11 @@ object CreditsDialog {
 
     private fun box(act: Activity, color: Int, line: Int) = GradientDrawable().apply {
         setColor(color)
-        cornerRadius = Ui.dp(act, 16f).toFloat()
+        cornerRadius = Ui.dp(act, 12f).toFloat()
         setStroke(Ui.dp(act, 1.2f), line)
     }
 
-    // зелёный скруглённый квадрат с тёмной каймой и свечением; внутри — тёмный силуэт головы огра с ушами
+    // красный скруглённый квадрат с тёмно-синей каймой и синим свечением; внутри — маска паука (WebIcons)
     private class Badge(act: Activity) : View(act) {
         private val density = act.resources.displayMetrics.density
         private val p = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -259,7 +227,7 @@ object CreditsDialog {
             p.shader = null
             p.style = Paint.Style.FILL
             p.color = 0xFF0B1633.toInt()
-            p.setShadowLayer(6f * density, 0f, 0f, 0x99E62429.toInt())
+            p.setShadowLayer(6f * density, 0f, 0f, 0x993B6FD8.toInt())
             canvas.drawRoundRect(rect, rr, rr, p)
             p.clearShadowLayer()
             val inset = 2.5f * density
@@ -295,9 +263,9 @@ object CreditsDialog {
             canvas.save()
             canvas.translate(b.left.toFloat(), b.top.toFloat())
             canvas.scale(s, s)
-            p.color = BTN_TEXT
+            p.color = 0xFFFFF3F4.toInt()
             canvas.drawCircle(12f, 12f, 12f, p)
-            p.color = 0xFF94C843.toInt()
+            p.color = 0xFFC8161F.toInt()
             canvas.drawPath(plane, p)
             canvas.restore()
         }
