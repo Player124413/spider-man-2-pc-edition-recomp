@@ -255,12 +255,17 @@ jobs:
       # страницу GitHub или zip, и Android отвечает «Пакет повреждён»; выпускается поэтому каждая сборка без игры
       # (с игрой — нельзя: внутри переведённый код игры, AGENTS.md, правило 6).
       - name: Выпуск (GitHub Releases)
-        if: github.event_name != 'pull_request' && steps.mode.outputs.game == '0'
+        if: github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
           APK: ${{ steps.pack.outputs.path }}
           VER: ${{ steps.pack.outputs.ver }}
+          GAME: ${{ steps.mode.outputs.game }}
         run: |
+          if [ "$GAME" = 1 ]; then
+            echo "APK с кодом игры в выпуск не выкладывается (AGENTS.md, правило 6)" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           TAG="v$VER"
           NAME=$(basename "$APK")
           SHA=$(sha256sum "$APK" | cut -d' ' -f1)
