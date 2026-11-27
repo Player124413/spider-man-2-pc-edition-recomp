@@ -651,14 +651,28 @@ static u32 g_joy_buttons;  // кнопки джойстика (биты Joy1..Jo
 // теряется — игра увидит кнопку нажатой хотя бы в одном опросе (dinput8 держит нажатие до чтения игрой).
 static u32 g_joy_latch;
 
-// Нажатие пункта меню БЕЗ МЫШИ: просим поток гостя нажать элемент меню его же родной функцией
-// (GUIComponent.InternalOnClick — тот же обработчик, что движок зовёт из обработки мыши). Сообщения мыши,
-// её курсор и кнопки в порте не участвуют вообще. Если у класса такой функции нет (game_menu_activate_result()
-// вернул 2), остаётся клавиша: стрелки/Enter/Esc — их меню игры понимает и без мыши.
-static int g_press_wait;      // ждём итога последнего запроса нажатия
-static u32 g_press_vk;        // нажатая клавиша-запасной путь (отпускается ниже)
+// Нажатие пункта меню — одно место для кнопки A, кнопки «назад» и тапа по экрану. Порт сам находит элемент,
+// который надо нажать (в фокусе крестовины или под пальцем), и жмёт ровно по его центру: внутренний курсор GUI
+// игры ставится в этот центр, а игра получает один щелчок — как если бы игрок попал в пункт мышью, только без
+// мыши и без прицеливания. Пока открыто настоящее GUI-меню, ничего другого с мышью не происходит.
+// SNX_MENU_NATIVE=1 — нажимать родной функцией GUI (GUIComponent.InternalOnClick), вообще без сообщений мыши.
+static enum { CLICK_IDLE, CLICK_ASK, CLICK_AIM, CLICK_DOWN, CLICK_NATIVE } g_click_stage;
+static u32 g_click_ticket;    // запрос «курсор GUI туда»
+static u32 g_click_up_at;     // когда отпустить кнопку
+static float g_click_x, g_click_y;  // центр нажимаемого элемента (для лога)
+static u32 g_press_vk;        // клавиша-запасной путь (когда пункта не нашли), отпускается ниже
 static u32 g_press_release;   // когда её отпустить
+static int g_click_native = -1;
 static unsigned g_press_diag;
+
+static int click_native(void)
+{
+    if (g_click_native < 0) {
+        const char *e = getenv("SNX_MENU_NATIVE");
+        g_click_native = e && *e == '1';
+    }
+    return g_click_native;
+}
 
 static void press_release(void)
 {
@@ -669,40 +683,28 @@ static void press_release(void)
     g_press_release = 0;
 }
 
-static void press_fallback(void)  // родной функции нет — жмём клавишу на 90 мс
+static void press_fallback(void)  // нажимать нечего — жмём клавишу на 90 мс (меню понимает клавиатуру)
 {
     press_release();
     key(g_press_vk = 0x0D, 1);
     g_press_release = SDL_GetTicks() + 90;
 }
 
-// нажать пункт в точке заднего буфера
-static void press_at(float x, float y)
+static void press(int at_point, float x, float y)
 {
-    game_menu_activate(1, x, y);
-    g_press_wait = 1;
+    if (g_click_stage == CLICK_DOWN)  // предыдущее нажатие ещё не отпущено
+        mouse_button(0, 0, cursor_lparam());
+    if (click_native()) {
+        game_menu_activate(at_point, x, y);
+        g_click_stage = CLICK_NATIVE;
+        return;
+    }
+    game_menu_element(at_point, x, y);  // где элемент — считает поток гостя
+    g_click_stage = CLICK_ASK;
 }
 
-// нажать пункт в фокусе (кнопка A)
-static void press_focus(void)
-{
-    game_menu_activate(0, 0.0f, 0.0f);
-    g_press_wait = 1;
-}
-
-static void press_tick(void)
-{
-    if (!g_press_wait)
-        return;
-    int r = game_menu_activate_result();
-    if (!r)
-        return;
-    g_press_wait = 0;
-    if (getenv("SNX_LOG_MENU") && g_press_diag++ < 40)
-        fprintf(stderr, "[menu] press -> %s\n", r == 1 ? "native InternalOnClick" : "key fallback (Enter)");
-    if (r == 2)
-        press_fallback();
-}
+static void press_at(float x, float y) { press(1, x, y); }
+static void press_focus(void) { press(0, 0.0f, 0.0f); }
 
 static void sync_cursor(float x, float y)  // курсор хоста (для WM_* и GetCursorPos) — туда же, где курсор GUI
 {
@@ -710,6 +712,58 @@ static void sync_cursor(float x, float y)  // курсор хоста (для WM
     if (d3d8_target_to_window(x, y, &u, &v)) {
         g_cu = u < 0.0f ? 0.0f : u > 1.0f ? 1.0f : u;
         g_cv = v < 0.0f ? 0.0f : v > 1.0f ? 1.0f : v;
+    }
+}
+
+static void press_tick(void)
+{
+    switch (g_click_stage) {
+    case CLICK_ASK: {
+        float x = 0.0f, y = 0.0f;
+        int r = game_menu_element_result(&x, &y);
+        if (!r)
+            return;
+        if (r == 2) {  // пункта нет — клавиша
+            g_click_stage = CLICK_IDLE;
+            press_fallback();
+            return;
+        }
+        sync_cursor(x, y);
+        g_click_x = x;
+        g_click_y = y;
+        g_click_ticket = game_menu_point(x, y);  // внутренний курсор GUI — ровно на элемент
+        g_click_stage = CLICK_AIM;
+        return;
+    }
+    case CLICK_AIM:
+        // ждём кадр: GUI должен увидеть курсор на элементе и взять его как активный — иначе щелчок уйдёт странице
+        if (!game_menu_point_done(g_click_ticket))
+            return;
+        mouse_button(0, 1, cursor_lparam());
+        g_click_up_at = SDL_GetTicks() + 90;
+        g_click_stage = CLICK_DOWN;
+        if (getenv("SNX_LOG_MENU") && g_press_diag++ < 40)
+            fprintf(stderr, "[menu] press: click on element at %.0f,%.0f\n", (double)g_click_x, (double)g_click_y);
+        return;
+    case CLICK_DOWN:
+        if (g_click_up_at && (s32)(SDL_GetTicks() - g_click_up_at) >= 0) {
+            mouse_button(0, 0, cursor_lparam());
+            g_click_stage = CLICK_IDLE;
+        }
+        return;
+    case CLICK_NATIVE: {
+        int r = game_menu_activate_result();
+        if (!r)
+            return;
+        g_click_stage = CLICK_IDLE;
+        if (getenv("SNX_LOG_MENU") && g_press_diag++ < 40)
+            fprintf(stderr, "[menu] press -> %s\n", r == 1 ? "native InternalOnClick" : "key fallback (Enter)");
+        if (r == 2)
+            press_fallback();
+        return;
+    }
+    default:
+        return;
     }
 }
 
@@ -730,6 +784,10 @@ static void back(int down)
     game_rect r;
     if (!down) {
         press_release();
+        if (g_click_stage == CLICK_DOWN) {
+            mouse_button(0, 0, cursor_lparam());
+            g_click_stage = CLICK_IDLE;
+        }
         return;
     }
     if (game_menu_back(&r)) {

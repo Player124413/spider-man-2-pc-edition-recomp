@@ -62,6 +62,8 @@ static float g_point_x, g_point_y;
 static u32 g_point_frame;  // кадр, в котором точка поставлена
 static int g_act_req, g_act_at, g_act_res;  // запрос «нажать пункт меню без мыши» и его итог
 static float g_act_x, g_act_y;
+static int g_el_req, g_el_at, g_el_res;     // запрос «где элемент меню» (для точного нажатия хостом)
+static float g_el_x, g_el_y, g_el_cx, g_el_cy;
 static int g_moved;        // гость сам поставил курсор (g_moved_x, g_moved_y)
 static float g_moved_x, g_moved_y;
 
@@ -792,6 +794,15 @@ void game_menu_frame(unsigned bb_w, unsigned bb_h)
         ay = g_act_y;
         g_act_req = 0;
     }
+    int el = 0, el_at = 0;
+    float ex = 0, ey = 0;
+    if (g_el_req) {
+        el = 1;
+        el_at = g_el_at;
+        ex = g_el_x;
+        ey = g_el_y;
+        g_el_req = 0;
+    }
     pthread_mutex_unlock(&g_lock);
 
     if (page) {
@@ -814,8 +825,24 @@ void game_menu_frame(unsigned bb_w, unsigned bb_h)
             set_mouse(px, py);
             set_flag(g_ctrl, &g_off.hide_cursor, 1);
         }
+        if (el) {
+            // нет фокуса (страница только открылась) — берём первый элемент по порядку чтения, как консоль
+            int i = el_at ? item_at(ex, ey) : (fi >= 0 ? fi : neighbor(-1, 1));
+            pthread_mutex_lock(&g_lock);
+            if (i >= 0) {
+                g_el_cx = (g_items[i].r.x0 + g_items[i].r.x1) * 0.5f;
+                g_el_cy = (g_items[i].r.y0 + g_items[i].r.y1) * 0.5f;
+                g_el_res = 1;
+            } else {
+                g_el_res = 2;
+            }
+            pthread_mutex_unlock(&g_lock);
+            if (getenv("SNX_LOG_MENU"))
+                fprintf(stderr, "[menu] element %s: %s (%.0f,%.0f)\n", el_at ? "at point" : "focused",
+                        i >= 0 ? uo_name(g_items[i].comp) : "nothing", (double)g_el_cx, (double)g_el_cy);
+        }
         if (act) {
-            int i = act_at ? item_at(ax, ay) : fi;
+            int i = act_at ? item_at(ax, ay) : (fi >= 0 ? fi : neighbor(-1, 1));
             if (i >= 0 && act_at)
                 focus(i);
             int ok = i >= 0 ? activate_item(i) : 0;
@@ -837,9 +864,12 @@ void game_menu_frame(unsigned bb_w, unsigned bb_h)
         }
     } else {
         g_last_edit = 0;
-        if (act) {  // меню уже закрылось — нажимать нечего, хост переходит на клавишу
+        if (act || el) {  // меню уже закрылось — нажимать нечего, хост переходит на клавишу
             pthread_mutex_lock(&g_lock);
-            g_act_res = 2;
+            if (act)
+                g_act_res = 2;
+            if (el)
+                g_el_res = 2;
             pthread_mutex_unlock(&g_lock);
         }
     }
@@ -923,6 +953,31 @@ int game_menu_point_done(unsigned ticket)
     int done = (int)(g_point_done - ticket) >= 0 && g_frames != g_point_frame;
     pthread_mutex_unlock(&g_lock);
     return done;
+}
+
+void game_menu_element(int at_point, float x, float y)
+{
+    pthread_mutex_lock(&g_lock);
+    g_el_at = at_point ? 1 : 0;
+    g_el_x = x;
+    g_el_y = y;
+    g_el_req = 1;
+    g_el_res = 0;
+    pthread_mutex_unlock(&g_lock);
+}
+
+int game_menu_element_result(float *x, float *y)
+{
+    pthread_mutex_lock(&g_lock);
+    int r = g_el_res;
+    if (r == 1) {
+        if (x)
+            *x = g_el_cx;
+        if (y)
+            *y = g_el_cy;
+    }
+    pthread_mutex_unlock(&g_lock);
+    return r;
 }
 
 void game_menu_activate(int at_point, float x, float y)

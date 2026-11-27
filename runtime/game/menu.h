@@ -37,6 +37,12 @@ void game_menu_edit_activate(void);  // открыть экранную клав
 unsigned game_menu_point(float x, float y);
 int game_menu_point_done(unsigned ticket);  // курсор на месте, и GUI уже видел его там (можно нажимать)
 void game_menu_cursor(int visible);          // показать курсор (стики) или спрятать (крестовина, касание)
+// Элемент меню, который нажался бы кнопкой A (at_point = 0) или тапом в точку (at_point = 1): поток гостя кладёт
+// в g_el_r Bounds элемента в пикселях заднего буфера, чтобы хост нажал ровно по нему. Исполняется в следующем кадре.
+void game_menu_element(int at_point, float x, float y);
+// Итог: 0 — ещё не исполнено, 1 — элемент найден (x, y — его центр), 2 — под точкой/в фокусе ничего нет.
+int game_menu_element_result(float *x, float *y);
+
 // Активировать элемент меню БЕЗ мыши: родная функция GUI (GUIComponent.InternalOnClick) у элемента в фокусе
 // (at_point = 0) или у элемента под точкой заднего буфера (at_point = 1, x, y). Исполняется в следующем кадре.
 void game_menu_activate(int at_point, float x, float y);
