@@ -60,6 +60,8 @@ static int g_req_nav[8], g_req_nav_n, g_req_tab, g_req_cursor = -1, g_req_edit;
 static unsigned g_point_req, g_point_done;  // номер последнего запроса точки и исполненного
 static float g_point_x, g_point_y;
 static u32 g_point_frame;  // кадр, в котором точка поставлена
+static int g_act_req, g_act_at, g_act_res;  // запрос «нажать пункт меню без мыши» и его итог
+static float g_act_x, g_act_y;
 static int g_moved;        // гость сам поставил курсор (g_moved_x, g_moved_y)
 static float g_moved_x, g_moved_y;
 
@@ -676,6 +678,36 @@ void game_menu_draw_overlay(int win_w, int win_h, float dx, float dy, float dw, 
     draw_legend(win_w, win_h, g_draw_focus_kind, g_draw_has_tabs);
 }
 
+// ---------------------------------------------------------------- нажатие без мыши
+// Пункт меню под точкой заднего буфера: самый маленький элемент, в чьи Bounds точка попала (кнопка внутри панели
+// меньше панели, ползунок меньше страницы). -1 — под точкой ничего.
+static int item_at(float x, float y)
+{
+    int best = -1;
+    float best_area = 0.0f;
+    for (int i = 0; i < g_n; i++) {
+        const game_rect *r = &g_items[i].r;
+        if (x < r->x0 || x > r->x1 || y < r->y0 || y > r->y1)
+            continue;
+        float area = (r->x1 - r->x0) * (r->y1 - r->y0);
+        if (best < 0 || area < best_area) {
+            best = i;
+            best_area = area;
+        }
+    }
+    return best;
+}
+
+// Нажать пункт родной функцией GUI: InternalOnClick(Sender) — тот же обработчик (делегат OnClick), который движок
+// зовёт из обработки мыши; сообщения мыши при этом не нужны вообще. 1 — обработчик найден и вызван.
+static int activate_item(int i)
+{
+    u32 comp = g_items[i].comp, sender = comp;
+    if (comp && uo_call(comp, "InternalOnClick", &sender, 1, NULL))
+        return 1;
+    return 0;
+}
+
 // ---------------------------------------------------------------- кадр
 void game_menu_frame(unsigned bb_w, unsigned bb_h)
 {
@@ -736,8 +768,8 @@ void game_menu_frame(unsigned bb_w, unsigned bb_h)
     }
     int fi = page ? focused_item(page) : -1;
 
-    int nav[9], nav_n, tab, cursor, req_edit, point = 0;
-    float px = 0, py = 0;
+    int nav[9], nav_n, tab, cursor, req_edit, point = 0, act = 0, act_at = 0;
+    float px = 0, py = 0, ax = 0, ay = 0;
     pthread_mutex_lock(&g_lock);
     nav_n = g_req_nav_n;
     memcpy(nav, g_req_nav, sizeof g_req_nav);
@@ -752,6 +784,13 @@ void game_menu_frame(unsigned bb_w, unsigned bb_h)
         point = 1;
         px = g_point_x;
         py = g_point_y;
+    }
+    if (g_act_req) {
+        act = 1;
+        act_at = g_act_at;
+        ax = g_act_x;
+        ay = g_act_y;
+        g_act_req = 0;
     }
     pthread_mutex_unlock(&g_lock);
 
@@ -775,6 +814,18 @@ void game_menu_frame(unsigned bb_w, unsigned bb_h)
             set_mouse(px, py);
             set_flag(g_ctrl, &g_off.hide_cursor, 1);
         }
+        if (act) {
+            int i = act_at ? item_at(ax, ay) : fi;
+            if (i >= 0 && act_at)
+                focus(i);
+            int ok = i >= 0 ? activate_item(i) : 0;
+            if (getenv("SNX_LOG_MENU"))
+                fprintf(stderr, "[menu] activate %s: %s\n", i >= 0 ? uo_name(g_items[i].comp) : "nothing",
+                        ok ? "native InternalOnClick" : "no InternalOnClick");
+            pthread_mutex_lock(&g_lock);
+            g_act_res = ok ? 1 : 2;
+            pthread_mutex_unlock(&g_lock);
+        }
         if (fi >= 0 && g_items[fi].kind == GM_EDIT) {
             u32 edit = g_items[fi].comp;
             if (edit != g_last_edit || req_edit) {
@@ -786,6 +837,11 @@ void game_menu_frame(unsigned bb_w, unsigned bb_h)
         }
     } else {
         g_last_edit = 0;
+        if (act) {  // меню уже закрылось — нажимать нечего, хост переходит на клавишу
+            pthread_mutex_lock(&g_lock);
+            g_act_res = 2;
+            pthread_mutex_unlock(&g_lock);
+        }
     }
     g_draw_open = page != 0;
     g_draw_focus_kind = fi >= 0 ? g_items[fi].kind : GM_NONE;
@@ -867,6 +923,25 @@ int game_menu_point_done(unsigned ticket)
     int done = (int)(g_point_done - ticket) >= 0 && g_frames != g_point_frame;
     pthread_mutex_unlock(&g_lock);
     return done;
+}
+
+void game_menu_activate(int at_point, float x, float y)
+{
+    pthread_mutex_lock(&g_lock);
+    g_act_at = at_point ? 1 : 0;
+    g_act_x = x;
+    g_act_y = y;
+    g_act_req = 1;
+    g_act_res = 0;
+    pthread_mutex_unlock(&g_lock);
+}
+
+int game_menu_activate_result(void)
+{
+    pthread_mutex_lock(&g_lock);
+    int r = g_act_res;
+    pthread_mutex_unlock(&g_lock);
+    return r;
 }
 
 void game_menu_cursor(int visible)

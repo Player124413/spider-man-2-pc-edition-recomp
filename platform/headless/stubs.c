@@ -53,6 +53,8 @@ void plat_drawable_size(int *w, int *h) { *w = 640; *h = 480; }
 void plat_swap(void) { }
 int plat_vsync_paced(void) { return 0; }
 int game_menu_open(int *focus) { if (focus) *focus = 0; return 0; }
+void game_menu_activate(int at_point, float x, float y) { (void)at_point; (void)x; (void)y; }
+int game_menu_activate_result(void) { return 2; }
 void game_menu_frame(unsigned w, unsigned h) { (void)w; (void)h; }
 void game_menu_draw_overlay(int w, int h, float dx, float dy, float dw, float dh)
 { (void)w; (void)h; (void)dx; (void)dy; (void)dw; (void)dh; }

@@ -651,12 +651,58 @@ static u32 g_joy_buttons;  // кнопки джойстика (биты Joy1..Jo
 // теряется — игра увидит кнопку нажатой хотя бы в одном опросе (dinput8 держит нажатие до чтения игрой).
 static u32 g_joy_latch;
 
-// Щелчок в точке заднего буфера (B — по кнопке «назад», касание экрана): курсор GUI ставит поток гостя
-// (game_menu_point), нажатие — когда GUI уже увидел курсор там (элемент под курсором выбирается заранее),
-// отпускание — с кнопкой/пальцем или сразу после нажатия, если их уже отпустили.
-static int g_click_state;  // 0 — нет, 1 — курсор подведён, ждём нажатия, 2 — нажата
-static int g_click_up;     // кнопка/палец уже отпущены
-static unsigned g_click_ticket;
+// Нажатие пункта меню БЕЗ МЫШИ: просим поток гостя нажать элемент меню его же родной функцией
+// (GUIComponent.InternalOnClick — тот же обработчик, что движок зовёт из обработки мыши). Сообщения мыши,
+// её курсор и кнопки в порте не участвуют вообще. Если у класса такой функции нет (game_menu_activate_result()
+// вернул 2), остаётся клавиша: стрелки/Enter/Esc — их меню игры понимает и без мыши.
+static int g_press_wait;      // ждём итога последнего запроса нажатия
+static u32 g_press_vk;        // нажатая клавиша-запасной путь (отпускается ниже)
+static u32 g_press_release;   // когда её отпустить
+static unsigned g_press_diag;
+
+static void press_release(void)
+{
+    if (g_press_vk) {
+        key(g_press_vk, 0);
+        g_press_vk = 0;
+    }
+    g_press_release = 0;
+}
+
+static void press_fallback(void)  // родной функции нет — жмём клавишу на 90 мс
+{
+    press_release();
+    key(g_press_vk = 0x0D, 1);
+    g_press_release = SDL_GetTicks() + 90;
+}
+
+// нажать пункт в точке заднего буфера
+static void press_at(float x, float y)
+{
+    game_menu_activate(1, x, y);
+    g_press_wait = 1;
+}
+
+// нажать пункт в фокусе (кнопка A)
+static void press_focus(void)
+{
+    game_menu_activate(0, 0.0f, 0.0f);
+    g_press_wait = 1;
+}
+
+static void press_tick(void)
+{
+    if (!g_press_wait)
+        return;
+    int r = game_menu_activate_result();
+    if (!r)
+        return;
+    g_press_wait = 0;
+    if (getenv("SNX_LOG_MENU") && g_press_diag++ < 40)
+        fprintf(stderr, "[menu] press -> %s\n", r == 1 ? "native InternalOnClick" : "key fallback (Enter)");
+    if (r == 2)
+        press_fallback();
+}
 
 static void sync_cursor(float x, float y)  // курсор хоста (для WM_* и GetCursorPos) — туда же, где курсор GUI
 {
@@ -667,66 +713,29 @@ static void sync_cursor(float x, float y)  // курсор хоста (для WM
     }
 }
 
-static void click_at(float x, float y)
-{
-    if (g_click_state == 2)
-        mouse_button(0, 0, cursor_lparam());
-    sync_cursor(x, y);
-    if (g_bink_menu) {
-        // Bink-меню игры не поднимает GUIController: ждать game_menu_point_done() бессмысленно —
-        // GUI не пришлёт кадр, и клик никогда не будет послан. Нажимаем сразу в точке касания.
-        // Перед нажатием двигаем курсор сообщением окну: меню выбирает пункт по WM_MOUSEMOVE,
-        // а не только по GetCursorPos (иначе клик приходит по старому element under cursor).
-        u32 hwnd = user32_focus();
-        if (hwnd)
-            user32_post(hwnd, WM_MOUSEMOVE, g_buttons, cursor_lparam());
-        mouse_button(0, 1, cursor_lparam());
-        g_click_state = 2;
-    } else {
-        g_click_ticket = game_menu_point(x, y);
-        g_click_state = 1;
-    }
-    g_click_up = 0;
-}
-
-static void click_release(void)
-{
-    if (g_click_state == 2) {
-        mouse_button(0, 0, cursor_lparam());
-        g_click_state = 0;
-    } else if (g_click_state == 1)
-        g_click_up = 1;
-}
-
-static void click_tick(void)
-{
-    if (g_click_state == 1 && game_menu_point_done(g_click_ticket)) {
-        mouse_button(0, 1, cursor_lparam());
-        g_click_state = 2;
-    } else if (g_click_state == 2 && g_click_up) {
-        mouse_button(0, 0, cursor_lparam());
-        g_click_state = 0;
-    }
-}
-
-static void touch(float u, float v)  // касание: доли окна -> точка заднего буфера
+static void touch(float u, float v)  // касание: доли окна -> нажать пункт меню под пальцем
 {
     int x, y;
-    if (d3d8_window_to_target(u, v, &x, &y))
-        click_at((float)x, (float)y);
+    if (!d3d8_window_to_target(u, v, &x, &y))
+        return;
+    if (g_bink_menu) {  // Bink-главное меню: пункт выбирается клавишей, мышь ему не нужна
+        press_fallback();
+        return;
+    }
+    press_at((float)x, (float)y);
 }
 
 static void back(int down)
 {
     game_rect r;
     if (!down) {
-        click_release();
+        press_release();
         return;
     }
     if (game_menu_back(&r)) {
         if (getenv("SNX_LOG_MENU"))
-            fprintf(stderr, "[menu] back: click (%.0f,%.0f)\n", (r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2);
-        click_at((r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2);
+            fprintf(stderr, "[menu] back: press (%.0f,%.0f)\n", (r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2);
+        press_at((r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2);
         return;
     }
     key(0x1B, 1);
@@ -789,11 +798,15 @@ static void select_(int down)
         return;
     }
     if (down && kind == GM_SLIDER)
-        return;
-    if (down && kind == GM_EDIT)
+        return;  // значение ползунка меняют стрелки, нажимать нечего
+    if (down && kind == GM_EDIT) {
         game_menu_edit_activate();
-    if (down || pressed)
-        mouse_button(0, down, cursor_lparam());
+        return;
+    }
+    if (down && !pressed)
+        press_focus();  // A: нажать пункт в фокусе родной функцией GUI (без мыши)
+    if (!down)
+        press_release();
     pressed = down;
 }
 
@@ -1269,7 +1282,7 @@ static void scripted_keys(void)
         held = 0;
     }
     if (clicked && SDL_GetTicks() - clicked >= 300) {  // палец убран
-        click_release();
+        press_release();
         clicked = 0;
     }
     double at;
@@ -1347,7 +1360,6 @@ static volatile int g_menu_override;
 // Клик по пункту меню: защёлка меню снимается только после реального выбора, а не просто потому,
 // что в кадре стало много draw-вызовов (иначе стик начинал двигать героя прямо в главном меню).
 static volatile int g_menu_clicked;
-static u32 g_mouse_click_release;  // отпускание ЛКМ после тапа виртуальной мышью
 
 void touch_pad(uint32_t buttons, float lx, float ly, float rx, float ry)
 {
@@ -1397,7 +1409,6 @@ void touch_menu_override(int on)
         // остаётся включённой и после перехода в игру, если игра не сообщила о живой пешке.
         g_menu_latch = 0;
         g_menu_clicked = 0;
-        g_mouse_click_release = 0;
     }
     fprintf(stderr, "[touch] menu override=%d latch=%d\n", g_menu_override, g_menu_latch);
 }
@@ -1414,7 +1425,8 @@ void touch_mouse(float u, float v, int down)
     pthread_mutex_unlock(&g_touch_lock);
 }
 
-// Отправляем настоящие SDL-события мыши: overlay-View перехватывает касания, и SDL их не видит.
+// Тап по меню из overlay-View (JNI mouse(...,2)): нажать пункт под пальцем. Наведение (down == -1) и нажатия
+// кнопок мыши больше не используются — мышь в порте не участвует ни в меню, ни в игре.
 static void apply_touch_mouse(void)
 {
     struct {
@@ -1428,51 +1440,15 @@ static void apply_touch_mouse(void)
     memcpy(evs, g_touch_mouse, (size_t)n * sizeof evs[0]);
     g_ntouch_mouse = 0;
     pthread_mutex_unlock(&g_touch_lock);
-    if (!n)
-        return;
-    SDL_Window *win = SDL_GetMouseFocus();
-    if (!win)
-        win = SDL_GetWindowFromID(1);
-    int ww = 1, wh = 1;
-    if (win)
-        SDL_GetWindowSize(win, &ww, &wh);
-    static int last_x = -1, last_y = -1;
-    static unsigned diag_mouse;
+    static unsigned diag;
     for (int i = 0; i < n; i++) {
-        float u = evs[i].u, v = evs[i].v;
-        if (u < 0.f) u = 0.f;
-        if (u > 1.f) u = 1.f;
-        if (v < 0.f) v = 0.f;
-        if (v > 1.f) v = 1.f;
-        int x = (int)(u * (float)ww), y = (int)(v * (float)wh);
-        if (evs[i].down == 1 || evs[i].down == 2)
-            g_menu_clicked = 1;
-        if (log_touch() && diag_mouse++ < 24)
-            fprintf(stderr, "[touch] virtual mouse %.2f,%.2f -> %d,%d down=%d\n", (double)u, (double)v, x, y,
-                    (int)evs[i].down);
-        SDL_Event e = {0};
-        e.type = SDL_MOUSEMOTION;
-        e.motion.x = x; e.motion.y = y;
-        e.motion.xrel = last_x < 0 ? 0 : x - last_x;
-        e.motion.yrel = last_y < 0 ? 0 : y - last_y;
-        e.motion.which = 0;
-        SDL_PushEvent(&e);
-        last_x = x; last_y = y;
-        if (evs[i].down == 2) {
-            // Тап: щёлкаем через общий helper меню — он одинаково работает в Bink-заставке и в GUI,
-            // сам ставит курсор в точку касания и посылает WM_MOUSEMOVE перед нажатием.
-            touch(u, v);
-            g_mouse_click_release = SDL_GetTicks() + 90;
-        } else if (evs[i].down >= 0) {
-            e = (SDL_Event){0};
-            e.type = evs[i].down ? SDL_MOUSEBUTTONDOWN : SDL_MOUSEBUTTONUP;
-            e.button.x = x; e.button.y = y; e.button.button = SDL_BUTTON_LEFT;
-            e.button.which = 0; e.button.clicks = 1;
-            SDL_PushEvent(&e);
-        }
+        if (evs[i].down != 2)  // тап; ведение пальца в меню ничего не нажимает
+            continue;
+        if (log_touch() && diag++ < 24)
+            fprintf(stderr, "[touch] menu tap %.2f,%.2f -> native press\n", (double)evs[i].u, (double)evs[i].v);
+        g_menu_clicked = 1;
+        touch(evs[i].u, evs[i].v);
     }
-    // Курсор игры показывается при наведении: пальцем водим по меню как мышью.
-    game_menu_cursor(1);
 }
 
 // Тап по пустому месту экрана в главном меню приходит из лаунчера через JNI (overlay-View перехватывает
@@ -1520,11 +1496,8 @@ static void apply_touch_taps(int menu)
                 g_select_release = SDL_GetTicks() + 90;
             }
         } else {
-            click_release();
-            if (g_bink_menu) {
-                key(0x0D, 0);
-                g_select_release = 0;
-            }
+            press_release();
+            g_select_release = 0;
         }
     }
 }
@@ -1751,7 +1724,7 @@ void input_tick(void)
     last = now;
     if (dt > 0.1f)
         dt = 0.1f;
-    click_tick();
+    press_tick();
     // отпускание клавиш, которые Bink-меню держит коротким нажатием (стрелки/Enter)
     u32 now_key = SDL_GetTicks();
     if (g_nav_release && (s32)(now_key - g_nav_release) >= 0) {
@@ -1763,10 +1736,8 @@ void input_tick(void)
         key(0x0D, 0);
         g_select_release = 0;
     }
-    if (g_mouse_click_release && (s32)(now_key - g_mouse_click_release) >= 0) {
-        click_release();
-        g_mouse_click_release = 0;
-    }
+    if (g_press_release && (s32)(now_key - g_press_release) >= 0)
+        press_release();
     // главное меню Spider-Man 2 — Bink-заставка без GUIController: без этого признака касания
     // перехватываются экранным геймпадом и пункты «Начать новую игру» не нажимаются
     int gui_menu = game_menu_open(NULL);
@@ -1807,7 +1778,7 @@ void input_tick(void)
             g_menu_clicked = 0;
         }
     }
-    apply_touch_taps(menu);       // тапы из overlay-View идут в click_at сразу, без SDL_FINGERDOWN
+    apply_touch_taps(menu);       // тапы из overlay-View: нажать пункт меню родной функцией GUI
     apply_touch_mouse();          // виртуальная мышь — через SDL_MOUSE*, как обычная мышь ПК
     // курки -> кнопки ZL/ZR
     for (int i = 0; i < 2; i++) {
@@ -1857,31 +1828,13 @@ void input_tick(void)
         g_nav_next = SDL_GetTicks() + 120;
         nav(g_nav_dir, 1);
     }
-    // меню: оба стика -> курсор (смещения мыши DirectInput); курсор виден, когда им водят
-    float cx = fabsf(lx) > fabsf(rx) ? lx : rx, cy = fabsf(ly) > fabsf(ry) ? ly : ry;
-    if (cx == 0.0f && cy == 0.0f)
-        return;
-    game_menu_cursor(1);
-    fx += cx * 1200.0f * dt;
-    fy += cy * 1200.0f * dt;
-    int dx = (int)fx, dy = (int)fy;
-    fx -= (float)dx;
-    fy -= (float)dy;
-    g_cu += cx * 0.7f * dt;
-    g_cv += cy * 0.9f * dt;
-    g_cu = g_cu < 0.0f ? 0.0f : g_cu > 1.0f ? 1.0f : g_cu;
-    g_cv = g_cv < 0.0f ? 0.0f : g_cv > 1.0f ? 1.0f : g_cv;
-    if (dx || dy)
-        dinput8_mouse_move(dx, dy, 0);
-    u32 hwnd = user32_focus();
-    if (hwnd)
-        user32_post(hwnd, WM_MOUSEMOVE, g_buttons, cursor_lparam());
+    // В меню стики ничего не двигают: пункты выбираются крестовиной, кнопками A/B и касанием — родными
+    // средствами GUI. Мышиного курсора в порте нет.
 }
 
-// Мышь в геймплее выключена: камеру двигает только палец (touch_look → dinput8_mouse_move), а всё, что
-// приходит от настоящей мыши или другого источника движения мыши, в геймплее игнорируется — именно это мешало
-// управлять камерой. В меню, лаунчере и на заставке мышь работает как обычно: курсор, клики, колесо.
-// SNX_MOUSE_IN_GAME=1 — вернуть мышь и в геймплей (отладка).
+// Мышь в порте не участвует: ни в игре, ни в меню. Камеру в игре ведёт палец (жест → градусы → ось правого
+// стика), меню — крестовина, A/B и касание (родные функции GUI игры). Всё, что приходит от настоящей мыши или
+// другого источника движения мыши, игнорируется. SNX_MOUSE_IN_GAME=1 — вернуть мышь целиком (отладка).
 static int mouse_allowed(void)
 {
     static int force = -1;
@@ -1889,9 +1842,7 @@ static int mouse_allowed(void)
         const char *e = getenv("SNX_MOUSE_IN_GAME");
         force = e && *e == '1';
     }
-    if (force)
-        return 1;
-    return g_menu || !game_player_active();
+    return force;
 }
 
 void input_event(const void *p)
@@ -1958,7 +1909,7 @@ void input_event(const void *p)
         if (e->type == SDL_FINGERDOWN)
             touch(e->tfinger.x, e->tfinger.y);
         else if (e->type == SDL_FINGERUP)
-            click_release();
+            press_release();
         else {  // палец ведут (ползунок): курсор GUI за ним
             int x, y;
             if (d3d8_window_to_target(e->tfinger.x, e->tfinger.y, &x, &y)) {
