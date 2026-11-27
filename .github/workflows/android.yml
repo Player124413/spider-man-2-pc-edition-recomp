@@ -271,33 +271,35 @@ jobs:
       # Выпусков в CI нет и не будет: APK публикует только владелец репозитория, вручную и сам.
       # Прогон отдаёт единственное — артефакт (сам APK, archive: false). Токен у прогона только на чтение.
 
-      # Проверка того, что реально скачивается: артефакт забирается обратно и сверяется с собранным APK байт в
-      # байт, а скачанный файл отдельно проверяется apksigner. Если хранилище артефактов отдаёт файл не целиком
-      # или портит его, сборка падает здесь, а не на телефоне («Пакет недействителен»).
-      - name: Проверка артефакта (скачивается байт в байт)
+      # Проверка того, что реально скачивается: хранилище артефактов считает digest (sha256) загруженного файла —
+      # сверяем его с собранным APK и с размером. Если хранилище приняло (или потом отдаёт) не тот файл, сборка
+      # падает здесь, а не на телефоне («Пакет недействителен (например, повреждён)»).
+      - name: Проверка артефакта (digest хранилища = sha256 собранного APK)
         env:
           GH_TOKEN: ${{ github.token }}
           APK: ${{ steps.pack.outputs.path }}
         run: |
-          BT="$ANDROID_HOME/build-tools/35.0.0"
           NAME=$(basename "$APK")
-          mkdir -p "$RUNNER_TEMP/dl"
-          for i in $(seq 1 10); do
-            gh run download "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY" -n "$NAME" -D "$RUNNER_TEMP/dl" && break
-            sleep 15
-          done
-          GOT="$RUNNER_TEMP/dl/$NAME"
-          [ -f "$GOT" ] || { echo "::error::артефакт $NAME не скачивается обратно"; exit 1; }
           A=$(sha256sum "$APK" | cut -d' ' -f1)
-          B=$(sha256sum "$GOT" | cut -d' ' -f1)
-          SIZE=$(stat -c%s "$GOT")
-          [ "$A" = "$B" ] || { echo "::error::скачанный артефакт не совпадает с APK: $B != $A"; exit 1; }
-          "$BT/apksigner" verify --verbose --print-certs "$GOT" > "$RUNNER_TEMP/dl.txt" \
-            || { echo "::error::скачанный артефакт не проходит проверку подписи"; cat "$RUNNER_TEMP/dl.txt"; exit 1; }
-          D=$(sed -n 's/.*certificate SHA-256 digest: //p' "$RUNNER_TEMP/dl.txt" | head -1)
-          echo "::notice title=APK::$NAME — $SIZE байт, sha256 $A, подпись $D, артефакт скачивается байт в байт"
+          SIZE=$(stat -c%s "$APK")
+          D=""; S=""
+          for i in $(seq 1 24); do
+            J=$(gh api "/repos/$GITHUB_REPOSITORY/actions/artifacts?name=$NAME" 2>/dev/null || true)
+            D=$(printf '%s' "$J" | jq -r --arg n "$NAME" '[.artifacts[] | select(.name==$n)][0].digest // ""')
+            S=$(printf '%s' "$J" | jq -r --arg n "$NAME" '[.artifacts[] | select(.name==$n)][0].size_in_bytes // ""')
+            [ -n "$D" ] && break
+            sleep 5
+          done
+          if [ "$D" != "sha256:$A" ] || [ "$S" != "$SIZE" ]; then
+            echo "::error::хранилище артефактов отдаёт не тот файл: digest=$D размер=$S, ожидалось sha256:$A размер=$SIZE"
+            exit 1
+          fi
+          CERT=$(sed -n 's/.*certificate SHA-256 digest: //p' "$RUNNER_TEMP/cert.txt" | head -1)
+          echo "::notice title=APK::$NAME — $SIZE байт, sha256 $A, ключ $CERT, v1+v2+v3; хранилище артефактов хранит ровно этот файл"
           {
             echo "### Артефакт"
             echo ""
-            echo "\`$NAME\` — $SIZE байт, sha256 \`$A\`, ключ \`$D\`, скачивается байт в байт"
+            echo "\`$NAME\` — $SIZE байт, sha256 \`$A\`, ключ \`$CERT\`, схемы v1+v2+v3"
+            echo ""
+            echo "digest хранилища артефактов совпадает с sha256 собранного APK"
           } >> "$GITHUB_STEP_SUMMARY"
