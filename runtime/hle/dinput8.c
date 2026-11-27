@@ -180,6 +180,23 @@ static void dev_Unacquire(CPU *c)
     RET(1, DI_OK);
 }
 
+// Смещения по X/Y, отданные состоянием устройства, убираем из буфера событий: игра читает мышь и через
+// GetDeviceState, и через GetDeviceData, и одно и то же движение применялось дважды — камера от этого дёргалась,
+// проскакивала и отскакивала назад. Колесо (ofs 8) не трогаем. Вызывать под g_in_lock.
+static void drop_move_events(void)
+{
+    int w = 0;
+    for (int i = 0; i < g_ev_count; i++) {
+        u32 *e = g_ev[(g_ev_head + i) % MQ];
+        if (e[0] == 0 || e[0] == 4)  // lX, lY
+            continue;
+        g_ev[(g_ev_head + w) % MQ][0] = e[0];
+        g_ev[(g_ev_head + w) % MQ][1] = e[1];
+        w++;
+    }
+    g_ev_count = w;
+}
+
 // GetDeviceState(cbData, lpvData): DIMOUSESTATE(2) = lX, lY, lZ, rgbButtons[4|8]
 static void dev_GetDeviceState(CPU *c)
 {
@@ -198,6 +215,7 @@ static void dev_GetDeviceState(CPU *c)
         wr32(g_mem, p + 4, (u32)g_dy);
         wr32(g_mem, p + 8, (u32)g_dz);
         g_dx = g_dy = g_dz = 0;
+        drop_move_events();  // эти же смещения не отдаём второй раз через буфер
         memcpy(g_mem + p + 12, g_btn, cb >= 20 ? 8 : 4);
         pthread_mutex_unlock(&g_in_lock);
     } else if (d && d->kind == DEV_KEYBOARD && cb >= 256) {

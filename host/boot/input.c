@@ -1587,6 +1587,7 @@ static void diag_tick(void)
 // В меню и лаунчере мышь работает как обычно: курсор, клики, колесо.
 #define CAM_COUNTS_PER_HEIGHT 1000.0f    // отсчётов мыши на высоту экрана по горизонтали: полный жест ≈180°
 #define CAM_COUNTS_PER_HEIGHT_P 667.0f   // по вертикали (наклон короче)
+#define CAM_MAX_COUNTS_PER_FRAME 40.0f   // за один кадр — не больше: иначе резкий жест приходит пачкой и камера прыгает
 static int g_cam_touched;                // камеру трогали в этом кадре (для cam_input)
 
 static void touch_tick(void)
@@ -1630,6 +1631,12 @@ static void touch_tick(void)
         static float mx, my;  // дробные остатки: за одно событие палец сдвигается меньше чем на отсчёт мыши
         mx += (g_invert_x ? -look_x : look_x) * CAM_COUNTS_PER_HEIGHT;
         my += (g_invert_y ? -look_y : look_y) * CAM_COUNTS_PER_HEIGHT_P;
+        // Резкий жест приходит из UI одной пачкой; отдаём её камере по частям (остаток держим в mx/my) —
+        // так поворот идёт ровно, без прыжков и отскоков.
+        if (mx > CAM_MAX_COUNTS_PER_FRAME) mx = CAM_MAX_COUNTS_PER_FRAME;
+        else if (mx < -CAM_MAX_COUNTS_PER_FRAME) mx = -CAM_MAX_COUNTS_PER_FRAME;
+        if (my > CAM_MAX_COUNTS_PER_FRAME) my = CAM_MAX_COUNTS_PER_FRAME;
+        else if (my < -CAM_MAX_COUNTS_PER_FRAME) my = -CAM_MAX_COUNTS_PER_FRAME;
         int dx = (int)mx, dy = (int)my;
         mx -= (float)dx;
         my -= (float)dy;
