@@ -249,24 +249,53 @@ jobs:
           retention-days: ${{ steps.pack.outputs.days }}
           if-no-files-found: error
 
-      # Выпуск для проверки обновлений лаунчером (Updater.kt ищет в выпусках APK с именем
-      # <Webhead2|webheadNX-nogame>-<версия>.apk и сравнивает число после последнего «-»). Только APK без
-      # игры: в APK с игрой — переведённый код игры, его не распространяем (AGENTS.md, правило 6).
+      # Выпуск (GitHub Releases) — постоянная ссылка на готовый .apk. Лаунчер (Updater.kt) ищет обновления
+      # именно здесь, и файл отсюда скачивается браузером как обычный .apk: без страницы прогона, без zip и без
+      # входа в GitHub. Артефакт прогона для установки не годится — с телефона вместо файла легко сохранить
+      # страницу GitHub или zip, и Android отвечает «Пакет повреждён»; выпускается поэтому каждая сборка без игры
+      # (с игрой — нельзя: внутри переведённый код игры, AGENTS.md, правило 6).
       - name: Выпуск (GitHub Releases)
-        if: github.event_name == 'workflow_dispatch' && inputs.release
+        if: github.event_name != 'pull_request' && steps.mode.outputs.game == '0'
         env:
           GH_TOKEN: ${{ github.token }}
-          GAME: ${{ steps.mode.outputs.game }}
           APK: ${{ steps.pack.outputs.path }}
           VER: ${{ steps.pack.outputs.ver }}
         run: |
-          if [ "$GAME" = 1 ]; then
-            echo "::error::Выпуск — только для APK без игры (в APK с игрой — переведённый код игры)"
-            exit 1
-          fi
           TAG="v$VER"
+          NAME=$(basename "$APK")
+          SHA=$(sha256sum "$APK" | cut -d' ' -f1)
+          SIZE=$(stat -c%s "$APK")
+          LINK="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG"
+          cp "$APK" "$RUNNER_TEMP/webheadNX-nogame-latest.apk"  # постоянная ссылка «последняя сборка»
+          NOTES=$(printf 'Сборка %s (%s): %s\n\nСкачать: %s/%s\nПостоянная ссылка на свежую сборку: https://github.com/%s/releases/latest/download/webheadNX-nogame-latest.apk\n\nsha256: %s' \
+            "$VER" "$(git log -1 --format=%h)" "$(git log -1 --format=%s)" "$LINK" "$NAME" "$GITHUB_REPOSITORY" "$SHA")
           gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
-            gh release create "$TAG" -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "webheadNX $VER" \
-              --notes "Сборка $VER ($(git log -1 --format=%h)): $(git log -1 --format=%s)"
+            gh release create "$TAG" -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --latest \
+              --title "webheadNX $VER" --notes "$NOTES"
           gh release upload "$TAG" "$APK" -R "$GITHUB_REPOSITORY" --clobber
-          echo "Выпуск: **$TAG**" >> "$GITHUB_STEP_SUMMARY"
+          gh release upload "$TAG" "$RUNNER_TEMP/webheadNX-nogame-latest.apk" -R "$GITHUB_REPOSITORY" --clobber
+          # Проверка выпуска насквозь: каждый файл скачивается по своей прямой ссылке и совпадает с собранным
+          # байт в байт. Обрезанная или подменённая загрузка на телефоне выглядит именно как «Пакет повреждён».
+          for A in "$NAME" webheadNX-nogame-latest.apk; do
+            ok=0
+            for i in 1 2 3 4 5; do
+              if curl -fsSL --retry 3 -o "$RUNNER_TEMP/dl.apk" "$LINK/$A"; then ok=1; break; fi
+              sleep 5
+            done
+            [ "$ok" = 1 ] || { echo "::error::файл $A не скачивается из выпуска $TAG"; exit 1; }
+            GOT_SHA=$(sha256sum "$RUNNER_TEMP/dl.apk" | cut -d' ' -f1)
+            GOT_SIZE=$(stat -c%s "$RUNNER_TEMP/dl.apk")
+            if [ "$GOT_SHA" != "$SHA" ] || [ "$GOT_SIZE" != "$SIZE" ]; then
+              echo "::error::выложенный $A не совпадает с собранным APK ($GOT_SIZE байт вместо $SIZE)"
+              exit 1
+            fi
+            echo "Проверено: $LINK/$A — $GOT_SIZE байт, sha256 совпадает" >> "$GITHUB_STEP_SUMMARY"
+          done
+          {
+            echo "### Выпуск $TAG"
+            echo ""
+            echo "**[Скачать $NAME]($LINK/$NAME)** ($((SIZE / 1024 / 1024)) МБ, sha256 \`$SHA\`)"
+            echo ""
+            echo "Постоянная ссылка на свежую сборку: https://github.com/$GITHUB_REPOSITORY/releases/latest/download/webheadNX-nogame-latest.apk"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice title=APK::Скачать: $LINK/$NAME"
