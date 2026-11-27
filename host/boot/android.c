@@ -69,8 +69,8 @@ JNIEXPORT void JNICALL JNI_FN(menuTap)(JNIEnv *env, jclass cls, jfloat u, jfloat
     touch_menu_tap(u, v, down ? 1 : 0);
 }
 
-// Камера пальцем: смещение пальца по экрану в пикселях — двигает камеру так же, как мышь в оригинале
-// (в порте Shrek 2 камера тоже идёт мышью, отсюда и «как в Шрек 2», только без стика)
+// Камера пальцем: смещение пальца в долях высоты экрана — двигает камеру так же, как мышь в оригинале;
+// в отсчёты мыши его переводит cam_tick по измеренному отклику камеры игры
 JNIEXPORT void JNICALL JNI_FN(look)(JNIEnv *env, jclass cls, jfloat dx, jfloat dy)
 {
     (void)env;
