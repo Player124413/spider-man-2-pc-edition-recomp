@@ -279,37 +279,23 @@ jobs:
       # Выпусков в CI нет и не будет: APK публикует только владелец репозитория, вручную и сам.
       # Прогон отдаёт единственное — артефакт (сам APK, archive: false). Токен у прогона только на чтение.
 
-      # Проверка того, что реально скачивается: хранилище артефактов считает digest (sha256) загруженного файла —
-      # сверяем его с собранным APK и с размером. Если хранилище приняло (или потом отдаёт) не тот файл, сборка
-      # падает здесь, а не на телефоне («Пакет недействителен (например, повреждён)»).
-      - name: Проверка артефакта (digest хранилища = sha256 собранного APK)
+      # Итог по файлу в аннотацию: имя, размер, sha256, отпечаток ключа. Сама проверка скачивания — в отдельном
+      # задании download-check: артефакт — обычный zip, поэтому digest хранилища относится к архиву, а не к APK.
+      - name: Итог по APK
         env:
-          GH_TOKEN: ${{ github.token }}
           APK: ${{ steps.pack.outputs.path }}
         run: |
           NAME=$(basename "$APK")
-          A=$(sha256sum "$APK" | cut -d' ' -f1)
           SIZE=$(stat -c%s "$APK")
-          D=""; S=""
-          for i in $(seq 1 24); do
-            J=$(gh api "/repos/$GITHUB_REPOSITORY/actions/artifacts?name=$NAME" 2>/dev/null || true)
-            D=$(printf '%s' "$J" | jq -r --arg n "$NAME" '[.artifacts[] | select(.name==$n)][0].digest // ""')
-            S=$(printf '%s' "$J" | jq -r --arg n "$NAME" '[.artifacts[] | select(.name==$n)][0].size_in_bytes // ""')
-            [ -n "$D" ] && break
-            sleep 5
-          done
-          if [ "$D" != "sha256:$A" ] || [ "$S" != "$SIZE" ]; then
-            echo "::error::хранилище артефактов отдаёт не тот файл: digest=$D размер=$S, ожидалось sha256:$A размер=$SIZE"
-            exit 1
-          fi
+          SHA=$(sha256sum "$APK" | cut -d' ' -f1)
           CERT=$(sed -n 's/.*certificate SHA-256 digest: //p' "$RUNNER_TEMP/cert.txt" | head -1)
-          echo "::notice title=APK::$NAME — $SIZE байт, sha256 $A, ключ $CERT, v1+v2+v3; хранилище артефактов хранит ровно этот файл"
+          echo "::notice title=APK::$NAME — $SIZE байт, sha256 $SHA, ключ $CERT, схемы v1+v2+v3"
           {
-            echo "### Артефакт"
+            echo "### APK"
             echo ""
-            echo "\`$NAME\` — $SIZE байт, sha256 \`$A\`, ключ \`$CERT\`, схемы v1+v2+v3"
+            echo "\`$NAME\` — $SIZE байт, sha256 \`$SHA\`, ключ \`$CERT\`, схемы v1+v2+v3"
             echo ""
-            echo "digest хранилища артефактов совпадает с sha256 собранного APK"
+            echo "Артефакт — zip с этим APK (архив скачивается целиком, APK распаковывается файловым менеджером)"
           } >> "$GITHUB_STEP_SUMMARY"
 
   # Проверка того, что реально скачивается с GitHub: артефакт забирается обратно, распаковывается и сверяется с
