@@ -30,10 +30,6 @@ on:
         description: 'Ссылка на архив игры (zip/7z/rar: папка игры или System; прямая, Яндекс Диск, Google Диск, Dropbox). Пусто — APK без игры'
         type: string
         default: ''
-      release:
-        description: 'Выпустить APK без игры в GitHub Releases (лаунчер проверяет там обновления). APK с кодом игры не выпускается'
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -57,9 +53,9 @@ jobs:
   apk:
     runs-on: ubuntu-24.04
     timeout-minutes: 300
-    # contents: write — только для шага «Выпуск» (gh release); остальные шаги токен не используют
+    # contents: read — токен только на чтение: CI ничего не публикует (выпуски делает владелец вручную)
     permissions:
-      contents: write
+      contents: read
     env:
       NDK_VERSION: 27.2.12479018
     steps:
@@ -249,58 +245,5 @@ jobs:
           retention-days: ${{ steps.pack.outputs.days }}
           if-no-files-found: error
 
-      # Выпуск (GitHub Releases) — постоянная ссылка на готовый .apk. Лаунчер (Updater.kt) ищет обновления
-      # именно здесь, и файл отсюда скачивается браузером как обычный .apk: без страницы прогона, без zip и без
-      # входа в GitHub. Артефакт прогона для установки не годится — с телефона вместо файла легко сохранить
-      # страницу GitHub или zip, и Android отвечает «Пакет повреждён»; выпускается поэтому каждая сборка без игры
-      # (с игрой — нельзя: внутри переведённый код игры, AGENTS.md, правило 6).
-      - name: Выпуск (GitHub Releases)
-        if: github.event_name != 'pull_request'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          APK: ${{ steps.pack.outputs.path }}
-          VER: ${{ steps.pack.outputs.ver }}
-          GAME: ${{ steps.mode.outputs.game }}
-        run: |
-          if [ "$GAME" = 1 ]; then
-            echo "APK с кодом игры в выпуск не выкладывается (AGENTS.md, правило 6)" >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          TAG="v$VER"
-          NAME=$(basename "$APK")
-          SHA=$(sha256sum "$APK" | cut -d' ' -f1)
-          SIZE=$(stat -c%s "$APK")
-          LINK="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG"
-          cp "$APK" "$RUNNER_TEMP/webheadNX-nogame-latest.apk"  # постоянная ссылка «последняя сборка»
-          NOTES=$(printf 'Сборка %s (%s): %s\n\nСкачать: %s/%s\nПостоянная ссылка на свежую сборку: https://github.com/%s/releases/latest/download/webheadNX-nogame-latest.apk\n\nsha256: %s' \
-            "$VER" "$(git log -1 --format=%h)" "$(git log -1 --format=%s)" "$LINK" "$NAME" "$GITHUB_REPOSITORY" "$SHA")
-          gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
-            gh release create "$TAG" -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --latest \
-              --title "webheadNX $VER" --notes "$NOTES"
-          gh release upload "$TAG" "$APK" -R "$GITHUB_REPOSITORY" --clobber
-          gh release upload "$TAG" "$RUNNER_TEMP/webheadNX-nogame-latest.apk" -R "$GITHUB_REPOSITORY" --clobber
-          # Проверка выпуска насквозь: каждый файл скачивается по своей прямой ссылке и совпадает с собранным
-          # байт в байт. Обрезанная или подменённая загрузка на телефоне выглядит именно как «Пакет повреждён».
-          for A in "$NAME" webheadNX-nogame-latest.apk; do
-            ok=0
-            for i in 1 2 3 4 5; do
-              if curl -fsSL --retry 3 -o "$RUNNER_TEMP/dl.apk" "$LINK/$A"; then ok=1; break; fi
-              sleep 5
-            done
-            [ "$ok" = 1 ] || { echo "::error::файл $A не скачивается из выпуска $TAG"; exit 1; }
-            GOT_SHA=$(sha256sum "$RUNNER_TEMP/dl.apk" | cut -d' ' -f1)
-            GOT_SIZE=$(stat -c%s "$RUNNER_TEMP/dl.apk")
-            if [ "$GOT_SHA" != "$SHA" ] || [ "$GOT_SIZE" != "$SIZE" ]; then
-              echo "::error::выложенный $A не совпадает с собранным APK ($GOT_SIZE байт вместо $SIZE)"
-              exit 1
-            fi
-            echo "Проверено: $LINK/$A — $GOT_SIZE байт, sha256 совпадает" >> "$GITHUB_STEP_SUMMARY"
-          done
-          {
-            echo "### Выпуск $TAG"
-            echo ""
-            echo "**[Скачать $NAME]($LINK/$NAME)** ($((SIZE / 1024 / 1024)) МБ, sha256 \`$SHA\`)"
-            echo ""
-            echo "Постоянная ссылка на свежую сборку: https://github.com/$GITHUB_REPOSITORY/releases/latest/download/webheadNX-nogame-latest.apk"
-          } >> "$GITHUB_STEP_SUMMARY"
-          echo "::notice title=APK::Скачать: $LINK/$NAME"
+      # Выпусков в CI нет: APK публикует владелец репозитория вручную, когда сборка проверена (см.
+      # docs/ANDROID.md, «Откуда брать APK»). Прогон отдаёт только артефакт.
