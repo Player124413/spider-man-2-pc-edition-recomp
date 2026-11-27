@@ -209,8 +209,8 @@ class GameActivity : SDLActivity(), InputManager.InputDeviceListener, DisplayMan
             .show()
     }
 
-    // Настройки на ходу. Чувствительность и скорость камеры TouchControlsView читает при каждом движении пальца
-    // (камера пальцем — смещение мыши, как в порте Shrek 2), поэтому ползунки действуют сразу, без перезапуска.
+    // Настройки на ходу. Камера пальцем одна, без режимов: сколько палец прошёл — на столько камера и повернулась,
+    // а «Чувствительность камеры» задаёт, сколько это градусов. Ползунки действуют сразу, без перезапуска.
     private fun settingsMenu() {
         val c = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val pad = Ui.dp(this, 16f)
@@ -226,24 +226,6 @@ class GameActivity : SDLActivity(), InputManager.InputDeviceListener, DisplayMan
             ((settings.camSpeed - 30f) / 10f).toInt().coerceIn(0, 17),
             { "${(30 + it * 10)}" }) {
             settings.camSpeed = 30f + it * 10f
-            camApply()
-        })
-        // Камера пальцем: «умная камера» (по умолчанию), виртуальный стик под пальцем, жест «градусы», отсчёты мыши.
-        c.addView(Ui.seekRow(this, L.t("Камера пальцем", "Finger camera"), 3, settings.camTouchMode.coerceIn(0, 3),
-            { i -> when (i) {
-                0 -> L.t("Стик под пальцем", "Stick under finger")
-                1 -> L.t("Жест (градусы)", "Drag (degrees)")
-                2 -> L.t("Отсчёты мыши", "Mouse counts")
-                else -> L.t("Умная камера", "Smart camera")
-            } }) {
-            settings.camTouchMode = it
-            camApply()
-        })
-        // «Умная камера»: сколько градусов поворота даёт жест по всей высоте экрана
-        c.addView(Ui.seekRow(this, L.t("Поворот на экран (умная)", "Turn per screen (smart)"), 16,
-            ((settings.camSens - 60f) / 20f).toInt().coerceIn(0, 16),
-            { "${60 + it * 20}°" }) {
-            settings.camSens = 60f + it * 20f
             camApply()
         })
         // Мёртвая зона правого стика геймпада. У пальца её нет и быть не должно: палец тянет камеру напрямую,
@@ -285,8 +267,6 @@ class GameActivity : SDLActivity(), InputManager.InputDeviceListener, DisplayMan
         try {
             SnxNative.camSet(settings.camDead, settings.camSpeed, settings.camInvX, settings.camInvY)
             SnxNative.lookSens(settings.lookSensitivity)
-            SnxNative.camTouch(settings.camTouchMode)
-            SnxNative.camSens(settings.camSens)
         } catch (e: UnsatisfiedLinkError) { }
     }
 

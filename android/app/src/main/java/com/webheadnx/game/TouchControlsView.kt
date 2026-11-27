@@ -84,37 +84,11 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
     // свободного экрана; кнопки и стики перехватывают касание первыми, поэтому большим пальцем камера крутится
     // рядом с ними. Смещение за событие уходит в SnxNative.look (мышь DirectInput), а не в ось джойстика.
     private var lookPointer = -1
-    // Камера пальцем как виртуальный правый стик (режим 0, по умолчанию): место касания — центр стика, отклонение
-    // пальца от него — значение оси. Никаких накоплений и обратной связи: отклонил — камера поворачивается с этой
-    // силой, отпустил — ось ровно 0. Центр «едет» за пальцем, если тянуть дальше радиуса, — как плавающий стик.
-    private var lookAnchorX = 0f
-    private var lookAnchorY = 0f
-    private fun lookRadius() = min(w(), h()) * 0.20f
-
     // Где можно начинать жест камеры: свободная правая часть экрана. Левая половина — зона ходового стика,
     // и случайное касание рядом с ним больше не крутит камеру. Если ходового стика в раскладке нет — можно везде.
     private fun lookAllowedAt(x: Float): Boolean {
         val hasMoveStick = controls.any { it.visible && it.kind == Kind.STICK && !it.rightStick && !it.floating }
         return !hasMoveStick || x > w() * 0.45f
-    }
-
-    // Центр стика НЕ двигается за пальцем: где коснулись — там центр, дальше радиуса отклонение просто
-    // упирается в максимум. Раньше центр «ехал» за пальцем, и после поворота вправо камера уходила влево
-    // (палец оказывался по другую сторону уже сдвинутого центра) — это и бесило.
-    private fun lookAxis(x: Float, y: Float) {
-        val r = lookRadius().coerceAtLeast(1f)
-        val dx = x - lookAnchorX
-        val dy = y - lookAnchorY
-        val d = hypot(dx, dy)
-        if (d < r * 0.06f) {  // мёртвая зона в центре, чтобы камера не дрожала от мелких касаний
-            SnxNative.camAxis(0f, 0f)
-            return
-        }
-        // мягкая кривая: у центра — точные мелкие повороты, у края — полная скорость (как аналоговый стик)
-        val k = min(1f, d / r).let { it * it * (3f - 2f * it) }  // smoothstep
-        val vx = dx / d * k
-        val vy = dy / d * k
-        SnxNative.camAxis(vx, vy)
     }
 
     private class StickState(var pointer: Int = -1, var cx: Float = 0f, var cy: Float = 0f, var vx: Float = 0f, var vy: Float = 0f)
@@ -432,10 +406,6 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
                 f.bind = Bind.LOOK
                 if (lookPointer < 0) {  // второй палец на пустом месте камеру не тянет
                     lookPointer = id
-                    lookAnchorX = x
-                    lookAnchorY = y
-                    if (settings.camTouchMode == 0)
-                        SnxNative.camAxis(0f, 0f)
                 }
             }
         }
@@ -456,14 +426,9 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
                 // столько же градусов поворота даёт любой телефон, а сколько это отсчётов мыши, решает порт
                 // (host/boot/input.c, cam_tick): он измеряет отклик камеры игры на жест и сам пересчитывает
                 // доли в отсчёты так, чтобы полный жест по высоте давал ≈180°. Ползунки на палец не влияют.
-                if (settings.camTouchMode == 0) {
-                    lookAxis(x, y)  // виртуальный правый стик под пальцем
-                    // тот же жест уходит и запасным путём: если игра перестанет читать ось стика, порт
-                    // переключится на отсчёты мыши — и жест продолжит работать без провала
-                    SnxNative.look((x - f.lastX) / max(1f, h()), (y - f.lastY) / max(1f, h()))
-                } else {
-                    SnxNative.look((x - f.lastX) / max(1f, h()), (y - f.lastY) / max(1f, h()))
-                }
+                // Один жест на всю камеру: сколько палец прошёл — на столько камера и повернулась (насколько
+                // «чуть-чуть» — задаёт «Чувствительность камеры» в шестерёнке, ползунок действует сразу).
+                SnxNative.look((x - f.lastX) / max(1f, h()), (y - f.lastY) / max(1f, h()))
             }
             Bind.CONTROL -> {
                 val c = f.ctl!!
@@ -499,11 +464,7 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
             invalidate()
             return
         }
-        if (f.bind == Bind.LOOK && lookPointer == id) {
-            lookPointer = -1
-            if (settings.camTouchMode == 0)
-                SnxNative.camAxis(0f, 0f)  // палец убран — ось ровно 0
-        }
+        if (f.bind == Bind.LOOK && lookPointer == id) lookPointer = -1
         if (f.bind == Bind.GEAR && onGearAt(x, y)) onGear?.invoke()
         if (f.bind == Bind.SLOT) slotFlash = 0
         val c = f.ctl
@@ -587,7 +548,6 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
             if (f.bind == Bind.MENU_TAP) SnxNative.mouse(f.lastX / max(1f, w()), f.lastY / max(1f, h()), -1)
         fingers.clear()
         sticks.values.forEach { it.pointer = -1; it.vx = 0f; it.vy = 0f }
-        if (lookPointer >= 0 && settings.camTouchMode == 0) SnxNative.camAxis(0f, 0f)
         lookPointer = -1
         dpadMask = 0
         slotFlash = 0

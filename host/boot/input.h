@@ -17,6 +17,3 @@ void input_set_look_sens(float v);
 void input_set_camera(float sens, float dead, float speed, int inv_x, int inv_y);
 // Режим камеры пальцем (шестерёнка): 0 — виртуальный правый стик под пальцем, 1 — жест «градусы»,
 // 2 — отсчёты мыши. Действует сразу, без перезапуска.
-void input_set_cam_touch(int mode);
-// «умная камера»: градусов поворота на полную высоту экрана (ползунок в шестерёнке действует сразу)
-void input_set_cam_sens(float deg);

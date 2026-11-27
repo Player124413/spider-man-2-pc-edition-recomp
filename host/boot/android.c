@@ -78,30 +78,6 @@ JNIEXPORT void JNICALL JNI_FN(look)(JNIEnv *env, jclass cls, jfloat dx, jfloat d
     touch_look(dx, dy);
 }
 
-// Камера пальцем как виртуальный правый стик: значение оси (-1..1) прямо с отклонения пальца (без накоплений)
-JNIEXPORT void JNICALL JNI_FN(camAxis)(JNIEnv *env, jclass cls, jfloat vx, jfloat vy)
-{
-    (void)env;
-    (void)cls;
-    touch_cam_axis(vx, vy);
-}
-
-// Режим камеры пальцем: 0 — виртуальный правый стик под пальцем, 1 — жест «градусы», 2 — отсчёты мыши
-JNIEXPORT void JNICALL JNI_FN(camTouch)(JNIEnv *env, jclass cls, jint mode)
-{
-    (void)env;
-    (void)cls;
-    input_set_cam_touch((int)mode);
-}
-
-// «Умная камера»: градусов поворота на полную высоту экрана (ползунок в шестерёнке)
-JNIEXPORT void JNICALL JNI_FN(camSens)(JNIEnv *env, jclass cls, jfloat v)
-{
-    (void)env;
-    (void)cls;
-    input_set_cam_sens(v);
-}
-
 // Чувствительность камеры правого стика: ползунок в шестерёнке действует сразу, без перезапуска игры
 JNIEXPORT void JNICALL JNI_FN(lookSens)(JNIEnv *env, jclass cls, jfloat v)
 {

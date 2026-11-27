@@ -76,17 +76,6 @@ class Settings(private val ctx: Context) {
     var camSpeed: Float
         get() = p.getFloat("camSpeed", 72f)
         set(v) { p.edit().putFloat("camSpeed", v).commit() }
-    // Камера пальцем: 0 — виртуальный правый стик под пальцем (место касания — центр, отклонение — сила),
-    // 1 — жест «сколько провёл, на столько и повернулось» (градусы), 2 — отсчёты мыши DirectInput,
-    // 3 — «умная камера» (по умолчанию): палец задаёт цель в градусах, поворот доводит тот выход, который в игре
-    // реально работает, а скорость отдачи подстраивается по факту — петля не перелетает и не отдаёт назад.
-    var camTouchMode: Int
-        get() = p.getInt("camTouchMode", 3)
-        set(v) { p.edit().putInt("camTouchMode", v).commit() }
-    // «Умная камера»: градусов поворота на полную высоту экрана (180 — весь экран = пол-оборота)
-    var camSens: Float
-        get() = p.getFloat("camSens", 180f)
-        set(v) { p.edit().putFloat("camSens", v).commit() }
     var camInvX: Boolean
         get() = p.getBoolean("camInvX", false)
         set(v) { p.edit().putBoolean("camInvX", v).commit() }
@@ -153,9 +142,7 @@ class Settings(private val ctx: Context) {
         env("SNX_LOOK_SENS", "%.2f".format(java.util.Locale.ROOT, lookSensitivity))  // и камера правым стиком
         env("SNX_CAM_DEAD", "%.2f".format(java.util.Locale.ROOT, camDead))
         env("SNX_CAM_SPEED", "%.0f".format(java.util.Locale.ROOT, camSpeed))
-        env("SNX_CAM_SENS", "%.0f".format(java.util.Locale.ROOT, camSens))  // «умная камера»: градусы на экран
         env("SNX_CAM_INV_X", if (camInvX) "1" else "0")
-        env("SNX_CAM_TOUCH", camTouchMode.toString())
         env("SNX_CAM_INV_Y", if (camInvY) "1" else "0")
         env("SNX_PAD_CAMERA", if (padCamera == 1) "joystick" else "mouse")
         if (cheats) env("SNX_CHEATS", "1")
