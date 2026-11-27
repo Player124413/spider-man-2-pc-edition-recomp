@@ -94,6 +94,14 @@ JNIEXPORT void JNICALL JNI_FN(camTouch)(JNIEnv *env, jclass cls, jint mode)
     input_set_cam_touch((int)mode);
 }
 
+// «Умная камера»: градусов поворота на полную высоту экрана (ползунок в шестерёнке)
+JNIEXPORT void JNICALL JNI_FN(camSens)(JNIEnv *env, jclass cls, jfloat v)
+{
+    (void)env;
+    (void)cls;
+    input_set_cam_sens(v);
+}
+
 // Чувствительность камеры правого стика: ползунок в шестерёнке действует сразу, без перезапуска игры
 JNIEXPORT void JNICALL JNI_FN(lookSens)(JNIEnv *env, jclass cls, jfloat v)
 {

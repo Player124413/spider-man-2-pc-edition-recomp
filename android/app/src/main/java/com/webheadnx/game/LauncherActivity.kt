@@ -37,6 +37,7 @@ class LauncherActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         s = Settings(this)
+        L.force = s.langForce  // ручной выбор языка из настроек (0 — по языку телефона)
         // «Указать папку…» (чтение игры по пути, «Доступ ко всем файлам») убрано: Play Protect предупреждал об
         // опасном разрешении. Папка вне каталога приложения без разрешения не читается — снова папка по умолчанию
         val def = Settings.defaultGameDir(this)
@@ -315,6 +316,13 @@ class LauncherActivity : Activity() {
         c.addView(Ui.switchRow(this, L.t("Прятать при геймпаде", "Hide with a gamepad"), L.t("Подключён геймпад — кнопки на экране не нужны", "A gamepad is connected — no need for on-screen buttons"),
             s.hideWithGamepad) { s.hideWithGamepad = it })
         c.addView(Ui.switchRow(this, L.t("Вибрация кнопок", "Button vibration"), null, s.haptics) { s.haptics = it })
+        // Язык интерфейса: по умолчанию — как в телефоне (русский телефон — русский лаунчер, иначе английский)
+        c.addView(Ui.choiceRow(this, "Язык / Language",
+            listOf(L.t("Как в телефоне", "Device"), "Русский", "English"), s.langForce.coerceIn(0, 2)) {
+            s.langForce = it
+            L.force = it
+            recreate()
+        })
         c.addView(Ui.seekRow(this, L.t("Чувствительность камеры", "Camera sensitivity"), 38, ((s.lookSensitivity - 0.1f) * 10f).toInt(),
             { "%.1f".format(0.1f + it / 10f) }) { s.lookSensitivity = 0.1f + it / 10f })
         c.addView(Ui.choiceRow(this, L.t("Камера правым стиком геймпада", "Gamepad right stick camera"),

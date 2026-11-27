@@ -5,8 +5,17 @@ import java.util.Locale
 // Язык интерфейса — по языку телефона: русский (и белорусский, казахский — у них обычно русский вторым), иначе
 // английский. Строки — парами прямо в коде (L.t("рус", "eng")): интерфейс собран кодом (Ui.kt), а не разметкой.
 object L {
+    // Ручной выбор языка из лаунчера (Settings.langForce): 0 — по языку телефона, 1 — русский, 2 — английский.
+    // Ставится в onCreate активити до сборки интерфейса.
+    @Volatile
+    var force: Int = 0
+
     val ru: Boolean
-        get() = Locale.getDefault().language in RU_LANGS
+        get() = when (force) {
+            1 -> true
+            2 -> false
+            else -> Locale.getDefault().language in RU_LANGS
+        }
 
     fun t(ru: String, en: String): String = if (this.ru) ru else en
 

@@ -47,6 +47,7 @@ class GameActivity : SDLActivity(), InputManager.InputDeviceListener, DisplayMan
 
     override fun onCreate(savedInstanceState: Bundle?) {
         settings = Settings(this)
+        L.force = settings.langForce  // язык интерфейса из лаунчера (0 — по языку телефона)
         super.onCreate(savedInstanceState)
         if (SDLActivity.mBrokenLibraries || SDLActivity.mLayout == null) return
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -227,14 +228,22 @@ class GameActivity : SDLActivity(), InputManager.InputDeviceListener, DisplayMan
             settings.camSpeed = 30f + it * 10f
             camApply()
         })
-        // Камера пальцем: виртуальный стик под пальцем (по умолчанию), жест «градусы» или отсчёты мыши.
-        c.addView(Ui.seekRow(this, L.t("Камера пальцем", "Finger camera"), 2, settings.camTouchMode.coerceIn(0, 2),
+        // Камера пальцем: «умная камера» (по умолчанию), виртуальный стик под пальцем, жест «градусы», отсчёты мыши.
+        c.addView(Ui.seekRow(this, L.t("Камера пальцем", "Finger camera"), 3, settings.camTouchMode.coerceIn(0, 3),
             { i -> when (i) {
                 0 -> L.t("Стик под пальцем", "Stick under finger")
                 1 -> L.t("Жест (градусы)", "Drag (degrees)")
-                else -> L.t("Отсчёты мыши", "Mouse counts")
+                2 -> L.t("Отсчёты мыши", "Mouse counts")
+                else -> L.t("Умная камера", "Smart camera")
             } }) {
             settings.camTouchMode = it
+            camApply()
+        })
+        // «Умная камера»: сколько градусов поворота даёт жест по всей высоте экрана
+        c.addView(Ui.seekRow(this, L.t("Поворот на экран (умная)", "Turn per screen (smart)"), 16,
+            ((settings.camSens - 60f) / 20f).toInt().coerceIn(0, 16),
+            { "${60 + it * 20}°" }) {
+            settings.camSens = 60f + it * 20f
             camApply()
         })
         // Мёртвая зона правого стика геймпада. У пальца её нет и быть не должно: палец тянет камеру напрямую,
@@ -277,6 +286,7 @@ class GameActivity : SDLActivity(), InputManager.InputDeviceListener, DisplayMan
             SnxNative.camSet(settings.camDead, settings.camSpeed, settings.camInvX, settings.camInvY)
             SnxNative.lookSens(settings.lookSensitivity)
             SnxNative.camTouch(settings.camTouchMode)
+            SnxNative.camSens(settings.camSens)
         } catch (e: UnsatisfiedLinkError) { }
     }
 
