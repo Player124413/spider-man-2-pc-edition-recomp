@@ -98,29 +98,22 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
         return !hasMoveStick || x > w() * 0.45f
     }
 
+    // Центр стика НЕ двигается за пальцем: где коснулись — там центр, дальше радиуса отклонение просто
+    // упирается в максимум. Раньше центр «ехал» за пальцем, и после поворота вправо камера уходила влево
+    // (палец оказывался по другую сторону уже сдвинутого центра) — это и бесило.
     private fun lookAxis(x: Float, y: Float) {
-        var dx = x - lookAnchorX
-        var dy = y - lookAnchorY
         val r = lookRadius().coerceAtLeast(1f)
+        val dx = x - lookAnchorX
+        val dy = y - lookAnchorY
         val d = hypot(dx, dy)
-        if (d > r) {  // дальше радиуса — тянем центр за пальцем, отклонение остаётся полным
-            val k = (d - r) / d
-            lookAnchorX += dx * k
-            lookAnchorY += dy * k
-            dx = x - lookAnchorX
-            dy = y - lookAnchorY
+        if (d < r * 0.06f) {  // мёртвая зона в центре, чтобы камера не дрожала от мелких касаний
+            SnxNative.camAxis(0f, 0f)
+            return
         }
-        var vx = dx / r
-        var vy = dy / r
-        val len = hypot(vx, vy)
-        if (len > 1f) {
-            vx /= len
-            vy /= len
-        }
-        if (len < 0.06f) {  // мягкая мёртвая зона, чтобы камера не дрожала от мелких касаний
-            vx = 0f
-            vy = 0f
-        }
+        // мягкая кривая: у центра — точные мелкие повороты, у края — полная скорость (как аналоговый стик)
+        val k = min(1f, d / r).let { it * it * (3f - 2f * it) }  // smoothstep
+        val vx = dx / d * k
+        val vy = dy / d * k
         SnxNative.camAxis(vx, vy)
     }
 

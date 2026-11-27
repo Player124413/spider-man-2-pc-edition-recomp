@@ -1669,9 +1669,9 @@ static void diag_tick(void)
 #define CAM_DEG_PER_HEIGHT_P 120.0f  // по вертикали (наклон короче)
 #define CAM_AXIS_RATE 200.0f         // градусов в секунду при полном отклонении оси (для расчёта шага)
 #define CAM_PENDING_MAX 170.0f       // больше за один раз не просим
-#define CAM_MOUSE_COUNTS_PER_HEIGHT 1000.0f   // запасной путь мышью, если ось не работает
-#define CAM_MOUSE_COUNTS_PER_HEIGHT_P 667.0f
-#define CAM_MOUSE_MAX_PER_FRAME 40.0f
+#define CAM_MOUSE_COUNTS_PER_HEIGHT 700.0f    // запасной путь мышью, если ось не работает
+#define CAM_MOUSE_COUNTS_PER_HEIGHT_P 470.0f
+#define CAM_MOUSE_MAX_PER_FRAME 14.0f         // меньше за кадр — камера не «перелетает» и не отдаёт назад
 
 static float g_cam_left_y, g_cam_left_p;  // сколько градусов ещё осталось повернуть
 static float g_cam_yaw_prev, g_cam_pitch_prev;
