@@ -59,6 +59,11 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
     }
     private val grid = Paint().apply { strokeWidth = 1f; color = 0x22FFFFFF }
     private val bmpPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    private val mousePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        color = 0xE6FFFFFF.toInt()
+        strokeWidth = 2f * density
+    }
     private val nameText = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textAlign = Paint.Align.CENTER
         isFakeBoldText = true
@@ -90,6 +95,8 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
     private val latched = HashSet<String>()      // залипшие кнопки (toggle)
     private var dpadMask = 0                      // крестовина: биты DPAD_*
     private var walkKeyDir = 0                    // запасной W/S для перед/назад, если игра не читает JoyY
+    private var mouseX = -1f                      // видимый курсор виртуальной мыши в меню
+    private var mouseY = -1f
 
     private var sentButtons = -1
     private var sentAxes = FloatArray(4) { Float.NaN }
@@ -104,9 +111,9 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
     private fun gearX() = 30f * density
     private fun gearY() = 30f * density
 
-    // Мыши в порте нет вообще. В меню экранные кнопки НЕ прячутся: крестовина водит фокус по пунктам, A выбирает,
-    // B — назад, а тап по пункту нажимает именно его — всё родными функциями GUI игры (SnxNative.mouse(x, y, 2) —
-    // это «нажми пункт под пальцем», сообщения мыши не посылаются). В игре пальцы по пустому месту крутят камеру.
+    // Виртуальная мышь (без настоящей мыши и без системного курсора): в меню тап по пустому месту — наведение и
+    // щелчок в точке пальца (SnxNative.mouse), курсор рисует порт. В игре те же пальцы по пустому месту крутят
+    // камеру. Экранные кнопки в меню HЕ прячутся: крестовина водит фокус, A нажимает, B — назад, старт — Esc.
     private fun active(): Boolean = editMode ||
         (!hiddenByGamepad && settings.touchEnabled)
     private fun controlsVisible(): Boolean = editMode ||
@@ -139,8 +146,20 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
                 }
             }
         }
-        if (!editMode)
+        if (!editMode) {
             drawGear(canvas)
+            if (mouseX >= 0f && menuActive()) drawMouseCursor(canvas)
+        }
+    }
+
+    // Курсор рисуется поверх игрового: пальцем водим по меню как мышью, и видно, куда нацелились.
+    private fun drawMouseCursor(canvas: Canvas) {
+        val r = 9f * density
+        canvas.drawCircle(mouseX, mouseY, r, mousePaint)
+        canvas.drawLine(mouseX - r * 1.7f, mouseY, mouseX - r * 0.5f, mouseY, mousePaint)
+        canvas.drawLine(mouseX + r * 0.5f, mouseY, mouseX + r * 1.7f, mouseY, mousePaint)
+        canvas.drawLine(mouseX, mouseY - r * 1.7f, mouseX, mouseY - r * 0.5f, mousePaint)
+        canvas.drawLine(mouseX, mouseY + r * 0.5f, mouseX, mouseY + r * 1.7f, mousePaint)
     }
 
     private fun drawGrid(canvas: Canvas) {
@@ -351,8 +370,12 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
         fingers[id] = f
         if (onGearAt(x, y)) { f.bind = Bind.GEAR; return }
         if (menuTapAt(x, y)) {
-            // Мышиного курсора больше нет: нажатие по пункту уходит в порт на отпускании, если палец не сдвинулся.
             f.bind = Bind.MENU_TAP
+            mouseX = x
+            mouseY = y
+            // Курсор ведём без нажатой кнопки; сам щелчок — по отпусканию, если палец не сдвинулся.
+            SnxNative.mouse(x / max(1f, w()), y / max(1f, h()), -1)
+            invalidate()
             return
         }
         if (!active()) return
@@ -402,7 +425,12 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
     private fun move(id: Int, x: Float, y: Float) {
         val f = fingers[id] ?: return
         when (f.bind) {
-            Bind.MENU_TAP -> {}  // мышиного наведения нет: пункт нажимается тапом (по отпусканию)
+            Bind.MENU_TAP -> {
+                mouseX = x
+                mouseY = y
+                invalidate()
+                SnxNative.mouse(x / max(1f, w()), y / max(1f, h()), -1)
+            }
             Bind.LOOK -> {
                 if (id != lookPointer) return  // камеру ведёт первый палец на пустом месте
                 // Камера пальцем — ОДИН жест, без единой настройки. Порт шлёт смещение в долях высоты экрана:
@@ -437,10 +465,14 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
     private fun up(id: Int, x: Float, y: Float) {
         val f = fingers.remove(id) ?: return
         if (f.bind == Bind.MENU_TAP) {
-            // Тап = нажать пункт, который оказался под пальцем (порт находит элемент и зовёт его родной
-            // обработчик — без мыши). Порог с запасом: при тапе палец всегда чуть смещается.
+            mouseX = x
+            mouseY = y
+            // Тап = щелчок в точке пальца. Перетаскивание = только наведение (ползунки/подсветка).
+            // порог щелчка с запасом: палец при тапе всегда чуть смещается, а промах на 12 dp читался
+            // как «ведение» и пункт меню не нажимался
             if (hypot(x - f.startX, y - f.startY) < 24f * density)
                 SnxNative.mouse(x / max(1f, w()), y / max(1f, h()), 2)
+            invalidate()
             return
         }
         if (f.bind == Bind.LOOK && lookPointer == id)
@@ -524,6 +556,8 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
     }
 
     fun releaseAll() {
+        for (f in fingers.values)
+            if (f.bind == Bind.MENU_TAP) SnxNative.mouse(f.lastX / max(1f, w()), f.lastY / max(1f, h()), -1)
         fingers.clear()
         sticks.values.forEach { it.pointer = -1; it.vx = 0f; it.vy = 0f }
         lookPointer = -1

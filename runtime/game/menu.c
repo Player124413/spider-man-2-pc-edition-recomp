@@ -60,8 +60,6 @@ static int g_req_nav[8], g_req_nav_n, g_req_tab, g_req_cursor = -1, g_req_edit;
 static unsigned g_point_req, g_point_done;  // номер последнего запроса точки и исполненного
 static float g_point_x, g_point_y;
 static u32 g_point_frame;  // кадр, в котором точка поставлена
-static int g_act_req, g_act_at, g_act_res;  // запрос «нажать пункт меню без мыши» и его итог
-static float g_act_x, g_act_y;
 static int g_el_req, g_el_at, g_el_res;     // запрос «где элемент меню» (для точного нажатия хостом)
 static float g_el_x, g_el_y, g_el_cx, g_el_cy;
 static int g_moved;        // гость сам поставил курсор (g_moved_x, g_moved_y)
@@ -700,16 +698,6 @@ static int item_at(float x, float y)
     return best;
 }
 
-// Нажать пункт родной функцией GUI: InternalOnClick(Sender) — тот же обработчик (делегат OnClick), который движок
-// зовёт из обработки мыши; сообщения мыши при этом не нужны вообще. 1 — обработчик найден и вызван.
-static int activate_item(int i)
-{
-    u32 comp = g_items[i].comp, sender = comp;
-    if (comp && uo_call(comp, "InternalOnClick", &sender, 1, NULL))
-        return 1;
-    return 0;
-}
-
 // ---------------------------------------------------------------- кадр
 void game_menu_frame(unsigned bb_w, unsigned bb_h)
 {
@@ -770,8 +758,8 @@ void game_menu_frame(unsigned bb_w, unsigned bb_h)
     }
     int fi = page ? focused_item(page) : -1;
 
-    int nav[9], nav_n, tab, cursor, req_edit, point = 0, act = 0, act_at = 0;
-    float px = 0, py = 0, ax = 0, ay = 0;
+    int nav[9], nav_n, tab, cursor, req_edit, point = 0;
+    float px = 0, py = 0;
     pthread_mutex_lock(&g_lock);
     nav_n = g_req_nav_n;
     memcpy(nav, g_req_nav, sizeof g_req_nav);
@@ -786,13 +774,6 @@ void game_menu_frame(unsigned bb_w, unsigned bb_h)
         point = 1;
         px = g_point_x;
         py = g_point_y;
-    }
-    if (g_act_req) {
-        act = 1;
-        act_at = g_act_at;
-        ax = g_act_x;
-        ay = g_act_y;
-        g_act_req = 0;
     }
     int el = 0, el_at = 0;
     float ex = 0, ey = 0;
@@ -841,18 +822,6 @@ void game_menu_frame(unsigned bb_w, unsigned bb_h)
                 fprintf(stderr, "[menu] element %s: %s (%.0f,%.0f)\n", el_at ? "at point" : "focused",
                         i >= 0 ? uo_name(g_items[i].comp) : "nothing", (double)g_el_cx, (double)g_el_cy);
         }
-        if (act) {
-            int i = act_at ? item_at(ax, ay) : (fi >= 0 ? fi : neighbor(-1, 1));
-            if (i >= 0 && act_at)
-                focus(i);
-            int ok = i >= 0 ? activate_item(i) : 0;
-            if (getenv("SNX_LOG_MENU"))
-                fprintf(stderr, "[menu] activate %s: %s\n", i >= 0 ? uo_name(g_items[i].comp) : "nothing",
-                        ok ? "native InternalOnClick" : "no InternalOnClick");
-            pthread_mutex_lock(&g_lock);
-            g_act_res = ok ? 1 : 2;
-            pthread_mutex_unlock(&g_lock);
-        }
         if (fi >= 0 && g_items[fi].kind == GM_EDIT) {
             u32 edit = g_items[fi].comp;
             if (edit != g_last_edit || req_edit) {
@@ -864,12 +833,9 @@ void game_menu_frame(unsigned bb_w, unsigned bb_h)
         }
     } else {
         g_last_edit = 0;
-        if (act || el) {  // меню уже закрылось — нажимать нечего, хост переходит на клавишу
+        if (el) {  // меню уже закрылось — нажимать нечего
             pthread_mutex_lock(&g_lock);
-            if (act)
-                g_act_res = 2;
-            if (el)
-                g_el_res = 2;
+            g_el_res = 2;
             pthread_mutex_unlock(&g_lock);
         }
     }
@@ -976,25 +942,6 @@ int game_menu_element_result(float *x, float *y)
         if (y)
             *y = g_el_cy;
     }
-    pthread_mutex_unlock(&g_lock);
-    return r;
-}
-
-void game_menu_activate(int at_point, float x, float y)
-{
-    pthread_mutex_lock(&g_lock);
-    g_act_at = at_point ? 1 : 0;
-    g_act_x = x;
-    g_act_y = y;
-    g_act_req = 1;
-    g_act_res = 0;
-    pthread_mutex_unlock(&g_lock);
-}
-
-int game_menu_activate_result(void)
-{
-    pthread_mutex_lock(&g_lock);
-    int r = g_act_res;
     pthread_mutex_unlock(&g_lock);
     return r;
 }

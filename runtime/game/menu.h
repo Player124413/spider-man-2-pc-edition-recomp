@@ -43,13 +43,6 @@ void game_menu_element(int at_point, float x, float y);
 // Итог: 0 — ещё не исполнено, 1 — элемент найден (x, y — его центр), 2 — под точкой/в фокусе ничего нет.
 int game_menu_element_result(float *x, float *y);
 
-// Активировать элемент меню БЕЗ мыши: родная функция GUI (GUIComponent.InternalOnClick) у элемента в фокусе
-// (at_point = 0) или у элемента под точкой заднего буфера (at_point = 1, x, y). Исполняется в следующем кадре.
-void game_menu_activate(int at_point, float x, float y);
-// Итог последнего запроса: 0 — ещё не исполнен (или запроса не было), 1 — сделано родной функцией GUI,
-// 2 — не вышло (у класса нет InternalOnClick): хосту остаётся клавиша-запасной путь.
-int game_menu_activate_result(void);
-
 // Курсор, поставленный гостем (переход крестовиной): 1 и точка, если изменился с прошлого вызова.
 int game_menu_cursor_moved(float *x, float *y);
 
