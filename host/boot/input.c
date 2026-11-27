@@ -1581,27 +1581,44 @@ static void diag_tick(void)
 }
 
 
-// ── Камера: удержание от автодоворота и калибровка жеста ─────────────────────────────────────────────
-// Игра сама доворачивает камеру за персонажем (камера «за спиной»): пока ведёшь героя стиком, камера едет
-// вместе с ним, и палец оказывается не у дел. Порт снимает поворот камеры с матрицы вида (d3d8_camera_yaw) и:
-//   1) учит, сколько градусов даёт один отсчёт мыши, — по жесту пальца, когда герой стоит (тогда камеру не
-//      трогает никто, кроме нас). Отсюда жест сам подстраивается под игру: полный жест по высоте экрана даёт
-//      CAM_GESTURE_DEG (≈180°) на любом телефоне и при любой чувствительности мыши в движке;
-//   2) пока герой идёт и камеру не трогают, гасит автодоворот небольшими встречными отсчётами — камера
-//      остаётся там, куда её поставили пальцем.
-// Если угол с матрицы не снимается (valid=0) или ещё не измерен, порт работает как раньше: жест по базовому
-// значению 0.18° на отсчёт (то есть 1000 отсчётов на высоту экрана), автодоворот не гасится.
-#define CAM_GESTURE_DEG 180.0f   // сколько градусов даёт полный жест по высоте экрана
-#define CAM_DEG_PER_COUNT 0.18f  // пока не измерено — типичное значение для этой игры
-static float g_cam_dpc = CAM_DEG_PER_COUNT;  // градусов на отсчёт мыши (знак — направление поворота)
-static int g_cam_cal;                        // 1 — измерено по жесту, можно гасить автодоворот
+// ── Камера: свободная камера ─────────────────────────────────────────────────────────────────────────
+// В игре камеру ведёт движок: она висит «за спиной» и сама доворачивается за героем — поэтому камера ехала
+// вместе с персонажем, а палец оказывался не у дел. Порт снимает с матрицы вида угол и наклон камеры
+// (d3d8_camera_yaw / d3d8_camera_pitch) и:
+//   1) учит отклик игры — сколько градусов даёт один отсчёт мыши. Меряет по жесту пальца, пока герой стоит
+//      (камеру тогда не двигает никто, кроме нас). Отсюда жест сам подстраивается под игру: полный жест по
+//      высоте экрана даёт CAM_GESTURE_DEG по горизонтали и CAM_GESTURE_DEG_P по вертикали на любом телефоне и
+//      при любой чувствительности мыши в движке;
+//   2) держит камеру свободной: пока её не трогают, маленькими встречными отсчётами возвращает её на тот угол
+//      и наклон, где её оставили. Движок больше не может ни довернуть камеру за героем, ни вернуть её за спину
+//      — камера остаётся там, куда её поставили, и смотрит туда, куда её направили.
+// Сценарные камеры и ролики не ломаются: при скачке угла (телепорт, смена камеры, загрузка) эталон просто
+// берётся заново, а если движок пересиливает (ошибка не уменьшается несколько кадров подряд), порт на время
+// отступает и больше не борется.
+// Если угол с матрицы не снимается, всё работает как раньше: жест по базовому 0.18° на отсчёт, камеру ведёт
+// движок. SNX_CAM_HOLD=0 — вернуть автодоворот движка.
+#define CAM_GESTURE_DEG 180.0f    // сколько градусов по горизонтали даёт полный жест по высоте экрана
+#define CAM_GESTURE_DEG_P 120.0f  // и по вертикали (вверх-вниз ход камеры короче, чем по кругу)
+#define CAM_DEG_PER_COUNT 0.18f   // пока не измерено — типичное значение для этой игры
+#define CAM_HOLD_STEP 14.0f       // максимум встречных отсчётов за кадр (горизонталь)
+#define CAM_HOLD_STEP_P 9.0f      // то же по вертикали
+static float g_cam_dpc = CAM_DEG_PER_COUNT;    // градусов на отсчёт мыши по горизонтали (знак — направление)
+static float g_cam_dpc_p = CAM_DEG_PER_COUNT;  // по вертикали
+static int g_cam_cal, g_cam_cal_p;             // 1 — отклик измерен, удержание включено
 static int g_cam_yaw_have;
-static float g_cam_yaw_prev;
-static float g_cam_hold;                     // угол, который держим, пока герой идёт
-static float g_cam_acc;                      // дробные остатки встречных отсчётов
-static float g_cam_sent, g_cam_sent_prev;    // сколько отсчётов отправил палец (в этом и в прошлом кадре)
+static float g_cam_yaw_prev, g_cam_pitch_prev;
+static float g_cam_hold, g_cam_hold_p;         // угол и наклон, которые держим
+static float g_cam_acc, g_cam_acc_p;           // дробные остатки встречных отсчётов
+static float g_cam_sent, g_cam_sent_prev;      // сколько отсчётов отправил палец (горизонталь)
+static float g_cam_sent_y, g_cam_sent_y_prev;  // то же по вертикали
 static float g_cam_cal_counts, g_cam_cal_yaw;  // окно измерения: отсчёты и поворот за один жест
-static int g_cam_touched;                    // камеру трогали в этом кадре
+static float g_cam_cal_counts_y, g_cam_cal_pitch;
+static float g_cam_err_prev;                   // ошибка удержания в прошлом кадре
+static int g_cam_cal_open;                     // 1 — окно измерения открыто (идёт жест)
+static int g_cam_bad;                          // сколько раз движок пересилил ДО измерения отклика
+static int g_cam_fight;                        // сколько кадров подряд ошибка растёт
+static u32 g_cam_yield_until;                  // до этого времени не боремся с движком
+static int g_cam_touched;                      // камеру трогали в этом кадре
 static int g_cam_logged;
 
 // Сколько отсчётов мыши приходится на долю высоты экрана (палец шлёт доли, см. TouchControlsView.look)
@@ -1615,6 +1632,16 @@ static float cam_counts_per_height(void)
     return CAM_GESTURE_DEG / dpc;
 }
 
+static float cam_counts_per_height_p(void)
+{
+    float dpc = fabsf(g_cam_dpc_p);
+    if (dpc < 0.06f)
+        dpc = 0.06f;
+    else if (dpc > 0.6f)
+        dpc = 0.6f;
+    return CAM_GESTURE_DEG_P / dpc;
+}
+
 static int cam_hold_wanted(void)
 {
     static int off = -1;
@@ -1625,87 +1652,147 @@ static int cam_hold_wanted(void)
     return !off;
 }
 
-// Каждый кадр: снять угол камеры, обновить калибровку и (если надо) удержать её от доворота.
+static float cam_wrap(float a)  // в -180..180
+{
+    while (a > 180.0f) a -= 360.0f;
+    while (a < -180.0f) a += 360.0f;
+    return a;
+}
+
+// Каждый кадр: снять угол и наклон камеры, обновить калибровку и (если надо) удержать камеру на месте.
+// steering — героя ведут стиком; cam_input — камеру двигают пальцем/правым стиком.
 static void cam_tick(int steering, int cam_input)
 {
     // Палец на камере: даже медленный жест, где за кадр не набралось целого отсчёта, — это управление камерой,
     // и удержание в этот момент молчит (иначе оно боролось бы с пальцем).
     if ((u32)(SDL_GetTicks() - atomic_load_explicit(&g_cam_touch_ms, memory_order_relaxed)) < 150u)
         cam_input = 1;
-    int valid;
+    int valid, pvalid;
     float yaw = d3d8_camera_yaw(&valid);
+    float pitch = d3d8_camera_pitch(&pvalid);
     if (!valid) {  // матрица вида недоступна — ничего не делаем, как раньше
         static int nagged;
         g_cam_yaw_have = 0;
         if (g_cam_cal && !nagged++)
-            fprintf(stderr, "[cam] camera yaw is not available: gesture uses the default, hold is off\n");
-        g_cam_cal = 0;
-        g_cam_sent = g_cam_sent_prev = 0.0f;
-        g_cam_cal_counts = g_cam_cal_yaw = 0.0f;
+            fprintf(stderr, "[cam] camera angle is not available: gesture uses the default, the camera is not held\n");
+        g_cam_cal = g_cam_cal_p = 0;
+        g_cam_sent = g_cam_sent_prev = g_cam_sent_y = g_cam_sent_y_prev = 0.0f;
+        g_cam_cal_counts = g_cam_cal_yaw = g_cam_cal_counts_y = g_cam_cal_pitch = 0.0f;
         return;
     }
-    float dyaw = 0.0f;
+    float dyaw = 0.0f, dpitch = 0.0f;
     if (g_cam_yaw_have) {
-        dyaw = yaw - g_cam_yaw_prev;
-        while (dyaw > 180.0f) dyaw -= 360.0f;
-        while (dyaw < -180.0f) dyaw += 360.0f;
+        dyaw = cam_wrap(yaw - g_cam_yaw_prev);
+        dpitch = pitch - g_cam_pitch_prev;
     }
     g_cam_yaw_prev = yaw;
+    g_cam_pitch_prev = pitch;
     g_cam_yaw_have = 1;
     int live = !g_menu && !g_input_frozen && game_player_active();
-    // 1) Калибровка: герой стоит, камеру двигает только палец — чистый отклик игры на наши отсчёты. Меряем
-    // не по одному кадру (игра сглаживает поворот, одиночный замер врёт), а за весь жест целиком: сколько
-    // отсчётов отправили — на столько градусов повернулось. Окно считается, пока выполняются условия, и
-    // оценивается, когда палец отпустили (или набралось 400 отсчётов).
-    int clean = live && !steering && !cam_input;
-    if (clean && g_cam_sent_prev != 0.0f) {
+    // 1) Отклик игры: герой стоит, камеру двигает только палец — чистый отклик на наши отсчёты. Меряем не по
+    // одному кадру (игра сглаживает поворот, одиночный замер врёт), а за весь жест целиком: сколько отсчётов
+    // отправили — на столько градусов повернулось. Окно копится, пока условия выполняются, и оценивается, когда
+    // палец отпустили (или набралось 400 отсчётов).
+    int gesturing = live && !steering && cam_input;  // жест пальцем, герой стоит: камеру двигаем только мы
+    int enough = fabsf(g_cam_cal_counts) >= 400.0f || fabsf(g_cam_cal_counts_y) >= 400.0f;
+    if (gesturing) {
         g_cam_cal_counts += g_cam_sent_prev;
         g_cam_cal_yaw += dyaw;
+        g_cam_cal_counts_y += g_cam_sent_y_prev;
+        g_cam_cal_pitch += dpitch;
+        g_cam_cal_open = 1;
     }
-    if (!clean || fabsf(g_cam_cal_counts) >= 400.0f) {  // жест закончился или набралось достаточно
+    if (g_cam_cal_open && (!gesturing || enough)) {
         if (fabsf(g_cam_cal_counts) >= 40.0f) {
             float ratio = g_cam_cal_yaw / g_cam_cal_counts;  // градусов на отсчёт (со знаком)
             if (fabsf(ratio) > 0.02f && fabsf(ratio) < 1.5f) {
                 g_cam_dpc = g_cam_cal ? g_cam_dpc * 0.6f + ratio * 0.4f : ratio;
-                if (!g_cam_cal) {
-                    g_cam_cal = 1;
-                    fprintf(stderr,
-                            "[cam] measured %.3f deg per mouse count: gesture %.0f counts per screen height\n",
-                            (double)g_cam_dpc, (double)cam_counts_per_height());
-                }
+                g_cam_cal = 1;
             }
         }
-        g_cam_cal_counts = 0.0f;
-        g_cam_cal_yaw = 0.0f;
+        if (fabsf(g_cam_cal_counts_y) >= 40.0f) {
+            float ratio = g_cam_cal_pitch / g_cam_cal_counts_y;
+            if (fabsf(ratio) > 0.02f && fabsf(ratio) < 1.5f) {
+                g_cam_dpc_p = g_cam_cal_p ? g_cam_dpc_p * 0.6f + ratio * 0.4f : ratio;
+                g_cam_cal_p = 1;
+            }
+        }
+        g_cam_cal_counts = g_cam_cal_yaw = g_cam_cal_counts_y = g_cam_cal_pitch = 0.0f;
+        g_cam_cal_open = gesturing ? 1 : 0;
     }
-    // 2) Удержание: герой идёт, камеру не трогают — встречными отсчётами возвращаем её на место.
-    if (live && g_cam_cal && cam_hold_wanted() && steering && !cam_input) {
-        float err = yaw - g_cam_hold;
-        while (err > 180.0f) err -= 360.0f;
-        while (err < -180.0f) err += 360.0f;
+    // 2) Свободная камера: камеру не трогают — держим её там, где её оставили, что бы ни делал движок.
+    u32 now = SDL_GetTicks();
+    int hold = live && cam_hold_wanted() && !cam_input;
+    if (hold && !g_cam_cal && g_cam_bad >= 2)
+        hold = 0;  // отклик ещё не измерен, а движок уже дважды пересилил — не боремся, ждём жест
+    if (hold && g_cam_yield_until && (s32)(now - g_cam_yield_until) < 0)
+        hold = 0;  // движок пересиливает (сценарная камера) — отступили, не боремся
+    if (hold) {
+        float err = cam_wrap(yaw - g_cam_hold);
         if (fabsf(err) > 30.0f) {  // сценарная камера, переход, загрузка — просто берём новый угол
             g_cam_hold = yaw;
             g_cam_acc = 0.0f;
         } else if (fabsf(err) > 0.2f) {
-            float corr = -err * 0.5f / g_cam_dpc;  // половина ошибки за кадр: без раскачки
-            if (corr > 12.0f) corr = 12.0f;
-            else if (corr < -12.0f) corr = -12.0f;
+            // Половина ошибки за кадр — без раскачки. Пока отклик не измерен (знак и величина неизвестны),
+            // идём осторожно: заведомо малый шаг, чтобы не сорваться в раскачку.
+            float corr = -err * (g_cam_cal ? 0.5f : 0.3f) / g_cam_dpc;
+            float step = g_cam_cal ? CAM_HOLD_STEP : 6.0f;
+            if (corr > step) corr = step;
+            else if (corr < -step) corr = -step;
             g_cam_acc += corr;
             int dx = (int)g_cam_acc;
             g_cam_acc -= (float)dx;
             if (dx)
                 dinput8_mouse_move(dx, 0, 0);
         }
+        if (pvalid && g_cam_cal_p) {  // наклон держим так же
+            float errp = pitch - g_cam_hold_p;
+            if (fabsf(errp) > 45.0f) {
+                g_cam_hold_p = pitch;
+                g_cam_acc_p = 0.0f;
+            } else if (fabsf(errp) > 0.15f) {
+                float corr = -errp * 0.5f / g_cam_dpc_p;
+                if (corr > CAM_HOLD_STEP_P) corr = CAM_HOLD_STEP_P;
+                else if (corr < -CAM_HOLD_STEP_P) corr = -CAM_HOLD_STEP_P;
+                g_cam_acc_p += corr;
+                int dy = (int)g_cam_acc_p;
+                g_cam_acc_p -= (float)dy;
+                if (dy)
+                    dinput8_mouse_move(0, dy, 0);
+            }
+        }
+        // Движок пересиливает, если ошибка не уменьшается, а растёт: не тратим кадры на борьбу, отступаем.
+        float aerr = fabsf(err);
+        if (aerr > g_cam_err_prev + 0.4f) {
+            if (++g_cam_fight > 20) {
+                g_cam_yield_until = now + 1200u;
+                g_cam_fight = 0;
+                if (!g_cam_cal)
+                    g_cam_bad++;
+                fprintf(stderr, "[cam] the game moves the camera itself: holding off for a moment\n");
+            }
+        } else {
+            g_cam_fight = 0;
+        }
+        g_cam_err_prev = aerr;
     } else {
         g_cam_hold = yaw;  // камеру не держим — эталон идёт за ней (палец и стик работают как обычно)
-        g_cam_acc = 0.0f;
+        g_cam_hold_p = pvalid ? pitch : g_cam_hold_p;
+        g_cam_acc = g_cam_acc_p = 0.0f;
+        g_cam_err_prev = 0.0f;
+        if (cam_input)
+            g_cam_fight = 0;
     }
-    if (live && !g_cam_logged && g_cam_cal) {
+    if (live && hold && !g_cam_logged) {
         g_cam_logged = 1;
-        fprintf(stderr, "[cam] hold on: camera stays where the finger leaves it while the hero runs\n");
+        fprintf(stderr, "[cam] free camera on: %.3f deg per mouse count (%s), pitch %s, %.0f counts per screen height\n",
+                (double)g_cam_dpc, g_cam_cal ? "measured" : "default", g_cam_cal_p ? "measured" : "default",
+                (double)cam_counts_per_height());
     }
     g_cam_sent_prev = g_cam_sent;
     g_cam_sent = 0.0f;
+    g_cam_sent_y_prev = g_cam_sent_y;
+    g_cam_sent_y = 0.0f;
 }
 
 static void touch_tick(void)
@@ -1747,16 +1834,18 @@ static void touch_tick(void)
     // «скорости от отклонения». Пока открыто меню игры, касание по свободному месту — щелчок курсором, камеры там нет.
     if (!g_input_frozen && (look_x != 0.0f || look_y != 0.0f)) {
         static float mx, my;  // дробные остатки: за одно событие палец сдвигается меньше чем на отсчёт мыши
-        float k = cam_counts_per_height();  // отсчётов на высоту экрана: учится по отклику камеры игры
-        mx += (g_invert_x ? -look_x : look_x) * k;
-        my += (g_invert_y ? -look_y : look_y) * k;
+        // отсчётов на высоту экрана по каждой оси: учатся по отклику камеры игры
+        mx += (g_invert_x ? -look_x : look_x) * cam_counts_per_height();
+        my += (g_invert_y ? -look_y : look_y) * cam_counts_per_height_p();
         int dx = (int)mx, dy = (int)my;
         mx -= (float)dx;
         my -= (float)dy;
         if (dx || dy) {
             dinput8_mouse_move(dx, dy, 0);
             g_cam_touched = 1;
-            g_cam_sent += (float)dx;  // для калибровки: сколько градусов дал этот сдвиг
+            // для калибровки: сколько отсчётов отправили и на сколько градусов повернулась камера
+            g_cam_sent += (float)dx;
+            g_cam_sent_y += (float)dy;
         }
     }
 }

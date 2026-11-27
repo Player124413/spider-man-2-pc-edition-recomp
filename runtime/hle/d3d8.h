@@ -32,6 +32,7 @@ void d3d8_splash(const u8 *bgrx, int w, int h, u32 stride);
 // от автодоворота за персонажем и калибрует жест пальца). valid = 0 — матрица не похожа на видовую, значение
 // брать нельзя (тогда хост работает по умолчанию).
 float d3d8_camera_yaw(int *valid);
+float d3d8_camera_pitch(int *valid);
 
 #ifdef __cplusplus
 }

@@ -3453,6 +3453,8 @@ static u32 g_last_frame_draws;  // сохраняем перед сбросом 
 // могли передать транспонированной). Ничего не подошло — valid=0, хост работает по значениям по умолчанию.
 static float g_cam_yaw;
 static int g_cam_yaw_ok;
+static float g_cam_pitch;
+static int g_cam_pitch_ok;
 
 static int cam_unit3(float x, float y, float z)
 {
@@ -3467,25 +3469,40 @@ float d3d8_camera_yaw(int *valid)
     return g_cam_yaw;
 }
 
+// Наклон камеры (градусы, плюс — вверх): из того же вектора взгляда матрицы вида.
+float d3d8_camera_pitch(int *valid)
+{
+    if (valid)
+        *valid = g_cam_pitch_ok;
+    return g_cam_pitch;
+}
+
 static void track_camera(const d3ddev *d)
 {
     if (!d) {
-        g_cam_yaw_ok = 0;
+        g_cam_yaw_ok = g_cam_pitch_ok = 0;
         return;
     }
     const float *m = d->view;
-    float x, z;
+    float x, y, z;
     if (cam_unit3(m[8], m[9], m[10])) {
         x = m[8];
+        y = m[9];
         z = m[10];
     } else if (cam_unit3(m[2], m[6], m[10])) {
         x = m[2];
+        y = m[6];
         z = m[10];
     } else {
-        g_cam_yaw_ok = 0;
+        g_cam_yaw_ok = g_cam_pitch_ok = 0;
         return;
     }
-    if (x * x + z * z < 0.0025f) {  // смотрим строго вверх/вниз — угол не определён
+    // Наклон: вертикальная составляющая вектора взгляда. Если взята не та ось (например, «правая»), наклон будет
+    // стоять нулём — тогда калибровка наклона сама не включится и камера просто не удерживается по вертикали.
+    float py = y > 1.0f ? 1.0f : (y < -1.0f ? -1.0f : y);
+    g_cam_pitch = asinf(py) * 57.2957795f;
+    g_cam_pitch_ok = 1;
+    if (x * x + z * z < 0.0025f) {  // смотрим строго вверх/вниз — угол по горизонтали не определён
         g_cam_yaw_ok = 0;
         return;
     }
