@@ -61,21 +61,16 @@ class Settings(private val ctx: Context) {
     var opacity: Float
         get() = p.getFloat("opacity", 0.6f)
         set(v) { p.edit().putFloat("opacity", v).commit() }
-    // Ключ lookSens2: камера пальцем теперь считает жест от своей базы (250 вместо 1000 отсчётов на высоту
-    // экрана), и подобранное в старых сборках значение (там ползунком лечили «не слушается») применялось бы
-    // к новому жесту и снова делало его слишком быстрым. Новый ключ = чистый старт с 1.0.
+    // Чувствительность камеры = «чувствительность мыши»: сколько градусов поворота даёт жест по всей высоте
+    // экрана (1.6 → 144°, то есть сдвиг пальца на десятую часть экрана ≈ 14°). Ключ lookSens3: камера пальцем
+    // теперь идёт отсчётами мыши, и подобранные в старых сборках значения (там ползунком лечили «не слушается»)
+    // к ней не относятся — чистый старт с живого, но не дёрганого значения.
     var lookSensitivity: Float
-        get() = p.getFloat("lookSens2", 1.0f)
-        set(v) { p.edit().putFloat("lookSens2", v).commit() }
-    // Камера (шестерёнка в игре правит на ходу, здесь — значения на запуск):
-    // палец тянет камеру напрямую (как мышь в ПК-версии и как в порте Shrek 2) — на него действуют
-    // чувствительность и скорость поворота; мёртвая зона осталась правому стику геймпада, зеркало осей — обоим.
-    var camDead: Float
-        get() = p.getFloat("camDead", 0.20f)
-        set(v) { p.edit().putFloat("camDead", v).commit() }
-    var camSpeed: Float
-        get() = p.getFloat("camSpeed", 72f)
-        set(v) { p.edit().putFloat("camSpeed", v).commit() }
+        get() = p.getFloat("lookSens3", 1.6f)
+        set(v) { p.edit().putFloat("lookSens3", v).commit() }
+    // Камера: из настроек остались ровно две вещи — чувствительность (выше: «чувствительность мыши») и зеркало
+    // осей. Мёртвой зоны и «скорости поворота» больше нет: это параметры оси правого стика геймпада, а камера
+    // пальцем идёт отсчётами мыши, как мышь в ПК-версии.
     var camInvX: Boolean
         get() = p.getBoolean("camInvX", false)
         set(v) { p.edit().putBoolean("camInvX", v).commit() }
@@ -92,13 +87,6 @@ class Settings(private val ctx: Context) {
     var haptics: Boolean
         get() = p.getBoolean("haptics", true)
         set(v) { p.edit().putBoolean("haptics", v).commit() }
-    // камера правым стиком: 1 — осью джойстика (по умолчанию: плавно, как на консоли; мышь в игре не нужна —
-    // ею водят только курсор в меню и паузе), 0 — смещениями мыши и в игре («как палец», запасной вариант: так
-    // камера не пропадает на Retroid Pocket/GameSir). Ключ новый (padCamera2): у старых сборок в настройках
-    // сохранено padCamera=0, и прежнее значение оставило бы мышь.
-    var padCamera: Int
-        get() = p.getInt("padCamera2", 1)
-        set(v) { p.edit().putInt("padCamera2", v).commit() }
     var cheats: Boolean  // читы: привязки команд в User.ini (host/boot/config.c) и меню «Читы» в игре (Cheats)
         get() = p.getBoolean("cheats", false)
         set(v) { p.edit().putBoolean("cheats", v).commit() }
@@ -140,11 +128,8 @@ class Settings(private val ctx: Context) {
         env("SNX_SHOW_FPS", if (showFps) "1" else "0")
         env("SNX_FILE_CACHE_MB", fileCacheMb.toString())
         env("SNX_LOOK_SENS", "%.2f".format(java.util.Locale.ROOT, lookSensitivity))  // и камера правым стиком
-        env("SNX_CAM_DEAD", "%.2f".format(java.util.Locale.ROOT, camDead))
-        env("SNX_CAM_SPEED", "%.0f".format(java.util.Locale.ROOT, camSpeed))
         env("SNX_CAM_INV_X", if (camInvX) "1" else "0")
         env("SNX_CAM_INV_Y", if (camInvY) "1" else "0")
-        env("SNX_PAD_CAMERA", if (padCamera == 1) "joystick" else "mouse")
         if (cheats) env("SNX_CHEATS", "1")
         // копия Webhead.exe и .dll во внутренней памяти (runtime/loader.c): их не удалит очистка или антивирус
         env("SNX_MODULE_DIR", moduleDir(ctx).apply { mkdirs() }.absolutePath)

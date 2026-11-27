@@ -309,15 +309,12 @@ void input_set_look_sens(float v)
 // читает поток ввода: значения простые (float/int в одно слово), такая гонка безвредна, замок — от одновременных
 // правок из двух мест.
 static pthread_mutex_t g_cam_lock = PTHREAD_MUTEX_INITIALIZER;
-void input_set_camera(float sens, float dead, float speed, int inv_x, int inv_y)
+// Камера: из настроек остались ровно две вещи — чувствительность и зеркало осей. Мёртвая зона и «скорость
+// поворота» — это параметры оси джойстика, к камере пальцем (мышь) они отношения не имеют; внутри остались
+// значения по умолчанию для правого стика геймпада.
+void input_set_cam_mirror(int inv_x, int inv_y)
 {
     pthread_mutex_lock(&g_cam_lock);
-    if (sens > 0.0f)
-        input_set_look_sens(sens);
-    if (dead >= 0.0f && dead <= 0.6f)
-        g_dead_cam = dead;
-    if (speed >= 10.0f && speed <= 400.0f)
-        g_cam_speed = speed;
     g_invert_x = inv_x != 0;
     g_invert_y = inv_y != 0;
     pthread_mutex_unlock(&g_cam_lock);
@@ -652,14 +649,13 @@ void input_init(const char *user_dir)
     // камера пальцем — одна, без режимов: сдвинул палец вправо — камера чуть вправо
     fprintf(stderr, "[input] finger camera: drag -> %.0f deg per screen height (x sensitivity %.2f)\n",
             (double)CAM_DEG_PER_HEIGHT, (double)atomic_load_explicit(&g_look_sens, memory_order_relaxed));
-    // камера из лаунчера: мёртвая зона, скорость поворота и зеркало осей (на ходу их правит шестерёнка)
-    input_set_camera((float)atof(getenv("SNX_LOOK_SENS") ? getenv("SNX_LOOK_SENS") : "0"),
-                     getenv("SNX_CAM_DEAD") ? (float)atof(getenv("SNX_CAM_DEAD")) : -1.0f,
-                     getenv("SNX_CAM_SPEED") ? (float)atof(getenv("SNX_CAM_SPEED")) : 0.0f,
-                     getenv("SNX_CAM_INV_X") && *getenv("SNX_CAM_INV_X") == '1',
-                     getenv("SNX_CAM_INV_Y") && *getenv("SNX_CAM_INV_Y") == '1');
-    fprintf(stderr, "[input] camera: deadzone %.2f, speed %.0f, mirror x=%d y=%d\n", (double)g_dead_cam,
-            (double)g_cam_speed, g_invert_x, g_invert_y);
+    // камера из лаунчера: чувствительность (она же «чувствительность мыши») и зеркало осей
+    if (ls && atof(ls) > 0.0)
+        input_set_look_sens((float)atof(ls));
+    input_set_cam_mirror(getenv("SNX_CAM_INV_X") && *getenv("SNX_CAM_INV_X") == '1',
+                         getenv("SNX_CAM_INV_Y") && *getenv("SNX_CAM_INV_Y") == '1');
+    fprintf(stderr, "[input] camera: sensitivity %.2f, mirror x=%d y=%d\n",
+            (double)atomic_load_explicit(&g_look_sens, memory_order_relaxed), g_invert_x, g_invert_y);
     const char *e = getenv("SNX_SHOW_FPS");  // поверх Snx.ini: лаунчер Android («Счётчик FPS»)
     if (e)
         d3d8_set_fps_overlay(*e == '1');

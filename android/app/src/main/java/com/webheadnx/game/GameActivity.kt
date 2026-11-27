@@ -215,25 +215,12 @@ class GameActivity : SDLActivity(), InputManager.InputDeviceListener, DisplayMan
         val c = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val pad = Ui.dp(this, 16f)
         c.setPadding(pad, Ui.dp(this, 8f), pad, 0)
-        c.addView(Ui.seekRow(this, L.t("Чувствительность камеры", "Camera sensitivity"), 38,
-            ((settings.lookSensitivity - 0.1f) * 10f).toInt().coerceIn(0, 38),
+        // Единственная настройка камеры: чувствительность, она же «чувствительность мыши» — сколько градусов
+        // поворота даёт жест по всей высоте экрана (1.6 → 144°, верх — 5.0 → 450°).
+        c.addView(Ui.seekRow(this, L.t("Чувствительность камеры (мышь)", "Camera sensitivity (mouse)"), 49,
+            ((settings.lookSensitivity - 0.1f) * 10f).toInt().coerceIn(0, 49),
             { "%.1f".format(0.1f + it / 10f) }) {
             settings.lookSensitivity = 0.1f + it / 10f
-            camApply()
-        })
-        // Скорость поворота: сколько поворота даёт полный наклон (CameraSpeed из Snx.ini) — правится на ходу
-        c.addView(Ui.seekRow(this, L.t("Скорость поворота камеры", "Camera turn speed"), 17,
-            ((settings.camSpeed - 30f) / 10f).toInt().coerceIn(0, 17),
-            { "${(30 + it * 10)}" }) {
-            settings.camSpeed = 30f + it * 10f
-            camApply()
-        })
-        // Мёртвая зона правого стика геймпада. У пальца её нет и быть не должно: палец тянет камеру напрямую,
-        // сколько провёл — на столько и повернулось (как мышь в ПК-версии и как в порте Shrek 2).
-        c.addView(Ui.seekRow(this, L.t("Мёртвая зона стика", "Stick dead zone"), 30,
-            ((settings.camDead - 0.05f) * 100f).toInt().coerceIn(0, 30),
-            { "%.2f".format(0.05f + it / 100f) }) {
-            settings.camDead = 0.05f + it / 100f
             camApply()
         })
         c.addView(Ui.switchRow(this, L.t("Зеркалить поворот (влево/вправо)", "Mirror turn (left/right)"), null,
@@ -265,7 +252,7 @@ class GameActivity : SDLActivity(), InputManager.InputDeviceListener, DisplayMan
     // параметры камеры живьём (чувствительность, мёртвая зона, скорость, зеркало осей) — без перезапуска игры
     private fun camApply() {
         try {
-            SnxNative.camSet(settings.camDead, settings.camSpeed, settings.camInvX, settings.camInvY)
+            SnxNative.camMirror(settings.camInvX, settings.camInvY)
             SnxNative.lookSens(settings.lookSensitivity)
         } catch (e: UnsatisfiedLinkError) { }
     }

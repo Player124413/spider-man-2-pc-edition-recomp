@@ -86,13 +86,13 @@ JNIEXPORT void JNICALL JNI_FN(lookSens)(JNIEnv *env, jclass cls, jfloat v)
     input_set_look_sens(v);
 }
 
-// Камера живьём: мёртвая зона, скорость поворота, зеркало осей (правый стик и палец-камера)
-JNIEXPORT void JNICALL JNI_FN(camSet)(JNIEnv *env, jclass cls, jfloat dead, jfloat speed, jboolean inv_x,
-                                     jboolean inv_y)
+// Камера живьём: зеркало осей (чувствительность — lookSens). Мёртвая зона и «скорость поворота» — параметры оси
+// правого стика геймпада, в настройках их больше нет.
+JNIEXPORT void JNICALL JNI_FN(camMirror)(JNIEnv *env, jclass cls, jboolean inv_x, jboolean inv_y)
 {
     (void)env;
     (void)cls;
-    input_set_camera(0.0f, dead, speed, inv_x ? 1 : 0, inv_y ? 1 : 0);
+    input_set_cam_mirror(inv_x ? 1 : 0, inv_y ? 1 : 0);
 }
 
 // Частота экрана (режим, выбранный GameActivity под ограничение FPS, или смена частоты системой) и ограничение
