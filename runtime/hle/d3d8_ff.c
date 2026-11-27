@@ -3446,8 +3446,68 @@ static void movie_overlay(d3ddev *d)
 
 static u32 g_last_frame_draws;  // сохраняем перед сбросом в Present: хост читает значение в input_tick
 
+// ── Угол камеры из матрицы вида ──────────────────────────────────────────────────────────────────────
+// Хост ведёт камеру осью правого стика (без мыши) и по этим углам видит, сколько градусов уже отработано:
+// сколько осталось — столько и просим осью. Матрица тут только читается, ничего не подменяется.
+static float g_cam_yaw, g_cam_pitch;
+static int g_cam_yaw_ok, g_cam_pitch_ok;
+
+static int cam_unit3(float x, float y, float z)
+{
+    float n = x * x + y * y + z * z;
+    if (n < 0.25f || n > 4.0f)
+        return 0;
+    return 1;
+}
+
+float d3d8_camera_yaw(int *valid)
+{
+    if (valid)
+        *valid = g_cam_yaw_ok;
+    return g_cam_yaw;
+}
+
+float d3d8_camera_pitch(int *valid)
+{
+    if (valid)
+        *valid = g_cam_pitch_ok;
+    return g_cam_pitch;
+}
+
+static void track_camera(const d3ddev *d)
+{
+    if (!d) {
+        g_cam_yaw_ok = g_cam_pitch_ok = 0;
+        return;
+    }
+    const float *m = d->view;
+    float x, y, z;
+    if (cam_unit3(m[8], m[9], m[10])) {  // третий вектор матрицы вида — направление взгляда
+        x = m[8];
+        y = m[9];
+        z = m[10];
+    } else if (cam_unit3(m[2], m[6], m[10])) {  // транспонированный вариант
+        x = m[2];
+        y = m[6];
+        z = m[10];
+    } else {
+        g_cam_yaw_ok = g_cam_pitch_ok = 0;
+        return;
+    }
+    float py = y > 1.0f ? 1.0f : (y < -1.0f ? -1.0f : y);
+    g_cam_pitch = asinf(py) * 57.2957795f;
+    g_cam_pitch_ok = 1;
+    if (x * x + z * z < 0.0025f) {  // смотрим строго вверх/вниз — поворот по горизонтали не определён
+        g_cam_yaw_ok = 0;
+        return;
+    }
+    g_cam_yaw = atan2f(x, z) * 57.2957795f;
+    g_cam_yaw_ok = 1;
+}
+
 void d3d8_present(d3ddev *d)
 {
+    track_camera(d);
     game_menu_frame(d->bb_w, d->bb_h);  // состояние меню игры — для ввода хоста и 4:3-режима
     game_rumble_frame();                // вибрация по урону игрока
     sync_menu_aspect_flag(d);

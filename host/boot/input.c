@@ -273,7 +273,7 @@ static int g_invert_x;  // зеркалить поворот камеры по �
 // Скорость: ось V даёт aMouseX = 20·V, мышь — 1,2 на отсчёт в секунду (MouseX: Axis aMouseX Speed=6, ×0,01;
 // UInput::ReadInput ×20/Δt), то есть CameraSpeed 72 ≈ 1200 отсчётов/с при полном наклоне; ещё × «Чувствительность
 // камеры» лаунчера (SNX_LOOK_SENS).
-static int g_cam_mouse;
+// Камера — всегда ось правого стика (без мыши). [Pad] CameraMode остаётся в файле настроек для совместимости.
 // Чувствительность камеры правится на ходу («Настройки» в игре — ползунок без перезапуска): читает поток ввода,
 // пишет UI-поток, поэтому атомарно.
 static _Atomic float g_look_sens = 1.0f;
@@ -574,7 +574,6 @@ static int load_settings(const char *text, const char *src)
             continue;
         }
         if (!strcasecmp(k, "CameraMode")) {
-            g_cam_mouse = strcasecmp(v, "Joystick") != 0;
             continue;
         }
         if (!strcasecmp(k, "Rumble")) {
@@ -627,16 +626,13 @@ static void input_load(const char *user_dir)
 void input_init(const char *user_dir)
 {
     input_load(user_dir);
-    const char *cm = getenv("SNX_PAD_CAMERA");  // поверх Snx.ini: лаунчер («Камера правым стиком»)
-    if (cm && *cm)
-        g_cam_mouse = strcasecmp(cm, "joystick") != 0;
     const char *ls = getenv("SNX_LOOK_SENS");
     if (ls && atof(ls) > 0.0)
         input_set_look_sens((float)atof(ls));
-    fprintf(stderr, "[input] right stick camera: %s, speed %.0f, sensitivity %.2f\n", g_cam_mouse ? "mouse" : "joystick",
+    fprintf(stderr, "[input] camera: right stick axis (no mouse), speed %.0f, sensitivity %.2f\n",
             (double)g_cam_speed, (double)atomic_load_explicit(&g_look_sens, memory_order_relaxed));
-    // камера пальцем — смещения мыши (как в ПК-версии и в порте Shrek 2): палец тянет камеру напрямую
-    fprintf(stderr, "[input] finger camera: drag -> mouse deltas\n");
+    // камера пальцем — градусы поворота, их отрабатывает ось правого стика: мышь в геймплее не участвует
+    fprintf(stderr, "[input] finger camera: drag -> degrees -> right stick axis (no mouse)\n");
     // камера из лаунчера: мёртвая зона, скорость поворота и зеркало осей (на ходу их правит шестерёнка)
     input_set_camera((float)atof(getenv("SNX_LOOK_SENS") ? getenv("SNX_LOOK_SENS") : "0"),
                      getenv("SNX_CAM_DEAD") ? (float)atof(getenv("SNX_CAM_DEAD")) : -1.0f,
@@ -1579,16 +1575,96 @@ static void diag_tick(void)
 }
 
 
-// ── Камера пальцем ───────────────────────────────────────────────────────────────────────────────────
-// Палец по свободному месту двигает камеру ровно на столько, на сколько сдвинулся сам, и один к одному уходит
-// в DirectInput-мышь — как мышь в оригинальной ПК-версии. В геймплее это единственное, что двигает мышь:
-// никаких автоматических подкруток и «удержаний» больше нет (именно они дёргали камеру и мешали управлять),
-// а мышь от физической мыши/прочих источников в геймплее игнорируется — см. mouse_allowed() в input_event.
-// В меню и лаунчере мышь работает как обычно: курсор, клики, колесо.
-#define CAM_COUNTS_PER_HEIGHT 1000.0f    // отсчётов мыши на высоту экрана по горизонтали: полный жест ≈180°
-#define CAM_COUNTS_PER_HEIGHT_P 667.0f   // по вертикали (наклон короче)
-#define CAM_MAX_COUNTS_PER_FRAME 40.0f   // за один кадр — не больше: иначе резкий жест приходит пачкой и камера прыгает
-static int g_cam_touched;                // камеру трогали в этом кадре (для cam_input)
+// ── Камера пальцем — без мыши ───────────────────────────────────────────────────────────────────────
+// Мышь в геймплее не используется вообще. Палец задаёт, на сколько градусов повернуть камеру, а доворачивает её
+// ось правого стика (JoyU/JoyV → aMouseX/aMouseY в привязках игры — та же ось, которой камера управляется в
+// консольной версии, и её же читает движок как обычный джойстик, без всякой мыши). Сколько градусов уже
+// отработано, видно по матрице вида (d3d8_camera_yaw / d3d8_camera_pitch): палец добавил — ось отрабатывает —
+// остаток уменьшается и просьба снимается. Нет пальца и нет остатка — ось ровно 0, камеру никто не трогает.
+// Если движок эту ось в игре не читает (замечаем по тому, что ось просит, а поворота нет), порт возвращается
+// к мыши, чтобы камера не осталась мёртвой.
+#define CAM_DEG_PER_HEIGHT 180.0f    // полный жест по высоте экрана — поворот на 180°
+#define CAM_DEG_PER_HEIGHT_P 120.0f  // по вертикали (наклон короче)
+#define CAM_AXIS_RATE 200.0f         // градусов в секунду при полном отклонении оси (для расчёта шага)
+#define CAM_PENDING_MAX 170.0f       // больше за один раз не просим
+#define CAM_MOUSE_COUNTS_PER_HEIGHT 1000.0f   // запасной путь мышью, если ось не работает
+#define CAM_MOUSE_COUNTS_PER_HEIGHT_P 667.0f
+#define CAM_MOUSE_MAX_PER_FRAME 40.0f
+
+static float g_cam_left_y, g_cam_left_p;  // сколько градусов ещё осталось повернуть
+static float g_cam_yaw_prev, g_cam_pitch_prev;
+static int g_cam_have;
+static int g_cam_stall_y, g_cam_stall_p;
+static int g_cam_axis_dead;  // ось правого стика не двигает камеру — работаем мышью, как раньше
+static int g_cam_touched;    // камеру трогали в этом кадре (для диагностики)
+
+static float cam_wrapf(float a)  // в -180..180
+{
+    while (a > 180.0f) a -= 360.0f;
+    while (a < -180.0f) a += 360.0f;
+    return a;
+}
+
+// Каждый кадр геймплея: снять, сколько градусов уже отработано камерой, и вернуть значения оси (-1..1).
+static void cam_axis_tick(float dt, float *axy, float *axp)
+{
+    int oky, okp;
+    float yaw = d3d8_camera_yaw(&oky);
+    float pitch = d3d8_camera_pitch(&okp);
+    float dy = 0.0f, dp = 0.0f;
+    if (!oky || !g_cam_have) {
+        g_cam_yaw_prev = yaw;
+        g_cam_pitch_prev = pitch;
+        g_cam_have = oky;
+    } else {
+        dy = cam_wrapf(yaw - g_cam_yaw_prev);
+        dp = pitch - g_cam_pitch_prev;
+        g_cam_yaw_prev = yaw;
+        g_cam_pitch_prev = pitch;
+        g_cam_left_y -= dy;  // столько уже отработано
+        g_cam_left_p -= dp;
+    }
+    float step = CAM_AXIS_RATE * (dt > 0.001f ? dt : 0.016f);
+    float y = g_cam_left_y / (step * 0.7f);
+    float p = g_cam_left_p / (step * 0.7f);
+    if (y > 1.0f) y = 1.0f;
+    else if (y < -1.0f) y = -1.0f;
+    if (p > 1.0f) p = 1.0f;
+    else if (p < -1.0f) p = -1.0f;
+    if (fabsf(g_cam_left_y) < 0.4f) {  // довернули — просьба снимается
+        g_cam_left_y = 0.0f;
+        y = 0.0f;
+    }
+    if (fabsf(g_cam_left_p) < 0.4f) {
+        g_cam_left_p = 0.0f;
+        p = 0.0f;
+    }
+    // Ось просит, а камера не поворачивается — движок её здесь не читает: не крутим камеру этой осью.
+    if (fabsf(y) > 0.5f && fabsf(dy) < 0.02f) {
+        if (++g_cam_stall_y > 12) {
+            g_cam_axis_dead = 1;
+            g_cam_left_y = 0.0f;
+            y = 0.0f;
+        }
+    } else {
+        g_cam_stall_y = 0;
+    }
+    if (fabsf(p) > 0.5f && fabsf(dp) < 0.02f) {
+        if (++g_cam_stall_p > 12) {
+            g_cam_left_p = 0.0f;
+            p = 0.0f;
+        }
+    } else {
+        g_cam_stall_p = 0;
+    }
+    if (g_cam_axis_dead) {
+        static int logged;
+        if (!logged++)
+            fprintf(stderr, "[cam] right-stick axis doesn't turn the camera here: falling back to mouse\n");
+    }
+    *axy = y;
+    *axp = p;
+}
 
 static void touch_tick(void)
 {
@@ -1628,22 +1704,31 @@ static void touch_tick(void)
     // в DirectInput-мышь, как в оригинальной ПК-версии (и как в порте Shrek 2) — без стика, мёртвой зоны и
     // «скорости от отклонения». Пока открыто меню игры, касание по свободному месту — щелчок курсором, камеры там нет.
     if (!g_input_frozen && (look_x != 0.0f || look_y != 0.0f)) {
-        static float mx, my;  // дробные остатки: за одно событие палец сдвигается меньше чем на отсчёт мыши
-        mx += (g_invert_x ? -look_x : look_x) * CAM_COUNTS_PER_HEIGHT;
-        my += (g_invert_y ? -look_y : look_y) * CAM_COUNTS_PER_HEIGHT_P;
-        // Резкий жест приходит из UI одной пачкой; отдаём её камере по частям (остаток держим в mx/my) —
-        // так поворот идёт ровно, без прыжков и отскоков.
-        if (mx > CAM_MAX_COUNTS_PER_FRAME) mx = CAM_MAX_COUNTS_PER_FRAME;
-        else if (mx < -CAM_MAX_COUNTS_PER_FRAME) mx = -CAM_MAX_COUNTS_PER_FRAME;
-        if (my > CAM_MAX_COUNTS_PER_FRAME) my = CAM_MAX_COUNTS_PER_FRAME;
-        else if (my < -CAM_MAX_COUNTS_PER_FRAME) my = -CAM_MAX_COUNTS_PER_FRAME;
-        int dx = (int)mx, dy = (int)my;
-        mx -= (float)dx;
-        my -= (float)dy;
-        if (dx || dy) {
-            dinput8_mouse_move(dx, dy, 0);
-            g_cam_touched = 1;
+        float wx = (g_invert_x ? -look_x : look_x), wy = (g_invert_y ? -look_y : look_y);
+        if (g_cam_axis_dead) {
+            // запасной путь: ось камеры в игре не работает — как раньше, отсчётами мыши
+            static float mx, my;
+            mx += wx * CAM_MOUSE_COUNTS_PER_HEIGHT;
+            my += wy * CAM_MOUSE_COUNTS_PER_HEIGHT_P;
+            if (mx > CAM_MOUSE_MAX_PER_FRAME) mx = CAM_MOUSE_MAX_PER_FRAME;
+            else if (mx < -CAM_MOUSE_MAX_PER_FRAME) mx = -CAM_MOUSE_MAX_PER_FRAME;
+            if (my > CAM_MOUSE_MAX_PER_FRAME) my = CAM_MOUSE_MAX_PER_FRAME;
+            else if (my < -CAM_MOUSE_MAX_PER_FRAME) my = -CAM_MOUSE_MAX_PER_FRAME;
+            int dx = (int)mx, dy = (int)my;
+            mx -= (float)dx;
+            my -= (float)dy;
+            if (dx || dy)
+                dinput8_mouse_move(dx, dy, 0);
+        } else {
+            // основной путь: палец добавляет градусы, их отрабатывает ось правого стика (без мыши)
+            g_cam_left_y += wx * CAM_DEG_PER_HEIGHT;
+            g_cam_left_p += wy * CAM_DEG_PER_HEIGHT_P;
+            if (g_cam_left_y > CAM_PENDING_MAX) g_cam_left_y = CAM_PENDING_MAX;
+            else if (g_cam_left_y < -CAM_PENDING_MAX) g_cam_left_y = -CAM_PENDING_MAX;
+            if (g_cam_left_p > CAM_PENDING_MAX) g_cam_left_p = CAM_PENDING_MAX;
+            else if (g_cam_left_p < -CAM_PENDING_MAX) g_cam_left_p = -CAM_PENDING_MAX;
         }
+        g_cam_touched = 1;
     }
 }
 
@@ -1747,25 +1832,18 @@ void input_tick(void)
         // джойстик: lX lY — левый стик, lRy lRz (JoyU, JoyV) — правый; крестовина — POV
         static const int pov_of[16] = {-1, 0, 18000, -1, 27000, 31500, 22500, 27000,
                                        9000, 4500, 13500, 9000, -1, 0, 18000, -1};
-        // «Чувствительность камеры» (ползунок лаунчера и шестерёнки) действует в обоих режимах: ось идёт в
-        // aMouseX как есть, поэтому множитель закладываем в значение оси.
+        // Камера — ось правого стика (JoyU/JoyV), без мыши: палец добавляет градусы, cam_axis_tick снимает,
+        // сколько уже отработано, и возвращает значение оси. Правый стик геймпада работает тем же путём.
+        float fay = 0.0f, fap = 0.0f;
+        if (!g_cam_axis_dead)
+            cam_axis_tick(dt, &fay, &fap);
+        float rxs = (g_invert_x ? -rx : rx), rys = (g_invert_y ? -ry : ry);
+        if (fabsf(fay) > fabsf(rxs))  // чей запрос сильнее, тот и ведёт камеру
+            rxs = fay;
+        if (fabsf(fap) > fabsf(rys))
+            rys = fap;
         float cs = g_cam_speed * atomic_load_explicit(&g_look_sens, memory_order_relaxed);
-        float ax[6] = {lx * g_move_speed, ly * g_move_speed, 0, 0, (g_invert_x ? -rx : rx) * cs,
-                       (g_invert_y ? -ry : ry) * cs};
-        if (g_cam_mouse) {  // камера — смещениями мыши, как пальцем (см. g_cam_mouse)
-            static float cfx, cfy;
-            float k = g_cam_speed * (1200.0f / 72.0f) * atomic_load_explicit(&g_look_sens, memory_order_relaxed) * dt;
-            ax[4] = ax[5] = 0.0f;
-            cfx += rx * k;
-            cfy += (g_invert_y ? -ry : ry) * k;
-            if (rx == 0.0f && ry == 0.0f)
-                cfx = cfy = 0.0f;
-            int dx = (int)cfx, dy = (int)cfy;
-            cfx -= (float)dx;
-            cfy -= (float)dy;
-            if (dx || dy)
-                dinput8_mouse_move(dx, dy, 0);
-        }
+        float ax[6] = {lx * g_move_speed, ly * g_move_speed, 0, 0, rxs * cs, rys * cs};
         dinput8_joy(ax, (g_joy_buttons | g_joy_latch) & 0xFFF, pov_of[g_joy_buttons >> 16 & 15]);
         g_joy_latch = 0;
         return;
