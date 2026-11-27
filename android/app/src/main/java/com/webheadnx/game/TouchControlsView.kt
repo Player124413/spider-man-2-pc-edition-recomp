@@ -96,6 +96,7 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
     private val latched = HashSet<String>()      // залипшие кнопки (toggle)
     private var dpadMask = 0                      // крестовина: биты DPAD_*
     private var walkKeyDir = 0                    // запасной W/S для перед/назад, если игра не читает JoyY
+    private var walkKeySide = 0                   // запасной A/D для влево/вправо, если игра не читает JoyX
 
     private var sentButtons = -1
     private var sentAxes = FloatArray(4) { Float.NaN }
@@ -597,6 +598,18 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
             else -> 0
         }
         if (walkKeyDir < 0) vks.add(0x57) else if (walkKeyDir > 0) vks.add(0x53)
+        // То же для влево/вправо: в Spider-Man 2 ось JoyX (aStrafe) в игре не читается так же, как JoyY —
+        // вперёд/назад работали только потому, что их дублировали клавиши W/S, а бокового дубля не было, и
+        // персонаж «не шёл» влево-вправо. Дублируем A/D с тем же гистерезисом; ось остаётся аналоговой.
+        val wx = ax[0]
+        walkKeySide = when {
+            walkKeySide == 0 && wx < -enterKey -> -1   // стик влево — A
+            walkKeySide == 0 && wx > enterKey -> 1     // стик вправо — D
+            walkKeySide == -1 && wx < -exitKey -> -1
+            walkKeySide == 1 && wx > exitKey -> 1
+            else -> 0
+        }
+        if (walkKeySide < 0) vks.add(0x41) else if (walkKeySide > 0) vks.add(0x44)
 
         if (buttons != sentButtons || !ax.contentEquals(sentAxes)) {
             try {
