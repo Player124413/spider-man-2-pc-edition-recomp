@@ -323,11 +323,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p dl
+          ok=0
           for i in $(seq 1 12); do
-            gh run download "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY" -D dl && break
-            sleep 10
+            rm -rf dl/*  # обрыв загрузки оставляет недокачанный файл — начинаем заново
+            if gh run download "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY" -D dl; then ok=1; break; fi
+            sleep 15
           done
-          find dl -name '*.apk' -print -exec stat -c%s {} \; | tee dl/list.txt
+          [ "$ok" = 1 ] || { echo "::error::артефакт прогона не скачивается целиком (обрыв загрузки)"; exit 1; }
+          find dl -name '*.apk' -print -exec stat -c%s {} \;
           APK=$(find dl -name '*.apk' | head -1)
           [ -n "$APK" ] || { echo "::error::в артефактах прогона нет APK"; exit 1; }
           echo "APK=$APK" >> "$GITHUB_ENV"
@@ -336,10 +339,11 @@ jobs:
       - name: Установка на эмулятор Android 13
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 33
-          target: google_apis
+          api-level: 30
+          target: default
           arch: x86_64
           disable-animations: true
+          emulator-boot-timeout: 900
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
           script: |
             set -o pipefail
@@ -347,7 +351,7 @@ jobs:
             echo "$OUT"
             printf '::notice title=adb install::%s\n' "$(echo "$OUT" | tr '\n' ' ' | cut -c1-300)"
             if echo "$OUT" | grep -q "Success"; then
-              echo "::notice title=Установка::APK установился на Android 13 целиком"
+              echo "::notice title=Установка::APK установился на эмулятор целиком"
             elif echo "$OUT" | grep -q "NO_MATCHING_ABIS"; then
               echo "::notice title=Установка::пакет разобран и подпись принята (только ABI не совпал: APK arm64, эмулятор x86_64)"
             else
