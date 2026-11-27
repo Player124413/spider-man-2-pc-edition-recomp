@@ -1322,7 +1322,8 @@ static int log_touch(void);  // ниже: в Android — всегда, на ПК
 static pthread_mutex_t g_touch_lock = PTHREAD_MUTEX_INITIALIZER;
 static u32 g_touch_buttons, g_touch_applied;
 static float g_touch_axis[4];
-static float g_look_x, g_look_y;  // смещение пальца по экрану за кадр (в отсчётах мыши), под g_touch_lock
+static float g_look_x, g_look_y;  // смещение пальца по экрану за кадр (доли высоты экрана), под g_touch_lock
+static _Atomic u32 g_cam_touch_ms;  // когда палец последний раз вёл камеру (удержание на это время выключается)
 static struct {
     short vk;
     char down;
@@ -1372,6 +1373,7 @@ void touch_look(float dx, float dy)
     g_look_x += dx;
     g_look_y += dy;
     pthread_mutex_unlock(&g_touch_lock);
+    atomic_store_explicit(&g_cam_touch_ms, SDL_GetTicks(), memory_order_relaxed);
 }
 
 void touch_key(int vk, int down)
@@ -1626,6 +1628,10 @@ static int cam_hold_wanted(void)
 // Каждый кадр: снять угол камеры, обновить калибровку и (если надо) удержать её от доворота.
 static void cam_tick(int steering, int cam_input)
 {
+    // Палец на камере: даже медленный жест, где за кадр не набралось целого отсчёта, — это управление камерой,
+    // и удержание в этот момент молчит (иначе оно боролось бы с пальцем).
+    if ((u32)(SDL_GetTicks() - atomic_load_explicit(&g_cam_touch_ms, memory_order_relaxed)) < 150u)
+        cam_input = 1;
     int valid;
     float yaw = d3d8_camera_yaw(&valid);
     if (!valid) {  // матрица вида недоступна — ничего не делаем, как раньше
