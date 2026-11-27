@@ -1514,8 +1514,8 @@ static void apply_touch_mouse(void)
             SDL_PushEvent(&e);
         }
     }
-    // Курсор игры показывается при наведении: пальцем водим по меню как мышью.
-    game_menu_cursor(1);
+    // Курсор игры не показываем: он мешал смотреть меню, а нажатие и так точное (по элементу под пальцем).
+    game_menu_cursor(0);
 }
 
 // Тап по пустому месту экрана в главном меню приходит из лаунчера через JNI (overlay-View перехватывает
@@ -1844,7 +1844,7 @@ void input_tick(void)
     if (menu != g_menu) {
         release_all();
         g_menu = menu;
-        game_menu_cursor(menu != 0);
+        game_menu_cursor(0);  // курсор игры не показываем никогда — он мешает
         g_nav_dir = -1;
         if (!menu) {
             g_joy_frozen = 0;
@@ -1905,7 +1905,7 @@ void input_tick(void)
     float cx = fabsf(lx) > fabsf(rx) ? lx : rx, cy = fabsf(ly) > fabsf(ry) ? ly : ry;
     if (cx == 0.0f && cy == 0.0f)
         return;
-    game_menu_cursor(1);
+    game_menu_cursor(0);  // курсор не показываем: пункты нажимаются кнопками и тапом
     fx += cx * 1200.0f * dt;
     fy += cy * 1200.0f * dt;
     int dx = (int)fx, dy = (int)fy;
