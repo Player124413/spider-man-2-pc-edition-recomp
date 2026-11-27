@@ -30,6 +30,10 @@ on:
         description: 'Ссылка на архив игры (zip/7z/rar: папка игры или System; прямая, Яндекс Диск, Google Диск, Dropbox). Пусто — APK без игры'
         type: string
         default: ''
+      release:
+        description: 'Приложить APK без игры к выпуску (по умолчанию не выпускается: выпуски делает владелец вручную)'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -53,9 +57,10 @@ jobs:
   apk:
     runs-on: ubuntu-24.04
     timeout-minutes: 300
-    # contents: read — токен только на чтение: CI ничего не публикует (выпуски делает владелец вручную)
+    # contents: write — только для ручного шага «Выпуск» (workflow_dispatch с release=true); push/PR ничего
+    # не публикуют
     permissions:
-      contents: read
+      contents: write
     env:
       NDK_VERSION: 27.2.12479018
     steps:
@@ -245,5 +250,53 @@ jobs:
           retention-days: ${{ steps.pack.outputs.days }}
           if-no-files-found: error
 
-      # Выпусков в CI нет: APK публикует владелец репозитория вручную, когда сборка проверена (см.
-      # docs/ANDROID.md, «Откуда брать APK»). Прогон отдаёт только артефакт.
+      # Выпуск — только по явному запросу («Run workflow» + release=true), никогда на push/PR: APK публикует
+      # владелец репозитория, когда сборка проверена (docs/ANDROID.md, «Откуда брать APK»). Нужен, когда с
+      # телефона надо взять файл прямой ссылкой: артефакт прогона браузер на телефоне иногда сохраняет не целиком
+      # (обрезанный файл Android показывает как «Пакет повреждён»/«Пакет недействителен»), а файл выпуска
+      # скачивается как обычный .apk.
+      - name: Выпуск (по запросу)
+        if: github.event_name == 'workflow_dispatch' && inputs.release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APK: ${{ steps.pack.outputs.path }}
+          VER: ${{ steps.pack.outputs.ver }}
+          GAME: ${{ steps.mode.outputs.game }}
+        run: |
+          if [ "$GAME" = 1 ]; then
+            echo "APK с кодом игры в выпуск не выкладывается (AGENTS.md, правило 6)" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          TAG="v$VER"
+          NAME=$(basename "$APK")
+          SHA=$(sha256sum "$APK" | cut -d' ' -f1)
+          SIZE=$(stat -c%s "$APK")
+          LINK="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG"
+          cp "$APK" "$RUNNER_TEMP/webheadNX-nogame-latest.apk"
+          NOTES=$(printf 'Сборка %s (%s): %s\n\nСкачать: %s/%s\nПостоянная ссылка: https://github.com/%s/releases/latest/download/webheadNX-nogame-latest.apk\n\nРазмер: %s байт\nsha256: %s' \
+            "$VER" "$(git log -1 --format=%h)" "$(git log -1 --format=%s)" "$LINK" "$NAME" "$GITHUB_REPOSITORY" "$SIZE" "$SHA")
+          gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create "$TAG" -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --latest \
+              --title "webheadNX $VER" --notes "$NOTES"
+          gh release upload "$TAG" "$APK" -R "$GITHUB_REPOSITORY" --clobber
+          gh release upload "$TAG" "$RUNNER_TEMP/webheadNX-nogame-latest.apk" -R "$GITHUB_REPOSITORY" --clobber
+          # Проверка насквозь: файл скачивается по своей ссылке и совпадает с собранным байт в байт
+          for A in "$NAME" webheadNX-nogame-latest.apk; do
+            ok=0
+            for i in 1 2 3 4 5; do
+              if curl -fsSL --retry 3 -o "$RUNNER_TEMP/dl.apk" "$LINK/$A"; then ok=1; break; fi
+              sleep 5
+            done
+            [ "$ok" = 1 ] || { echo "::error::файл $A не скачивается из выпуска $TAG"; exit 1; }
+            GOT_SHA=$(sha256sum "$RUNNER_TEMP/dl.apk" | cut -d' ' -f1)
+            GOT_SIZE=$(stat -c%s "$RUNNER_TEMP/dl.apk")
+            [ "$GOT_SHA" = "$SHA" ] && [ "$GOT_SIZE" = "$SIZE" ] \
+              || { echo "::error::выложенный $A не совпадает с собранным APK ($GOT_SIZE байт вместо $SIZE)"; exit 1; }
+            echo "Проверено: $LINK/$A — $GOT_SIZE байт, sha256 совпадает" >> "$GITHUB_STEP_SUMMARY"
+          done
+          {
+            echo "### Выпуск $TAG"
+            echo ""
+            echo "**[Скачать $NAME]($LINK/$NAME)** — $SIZE байт, sha256 \`$SHA\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice title=APK::Скачать: $LINK/$NAME"
