@@ -279,6 +279,8 @@ static int g_invert_x;  // зеркалить поворот камеры по �
 // 1 — жест «сколько провёл, на столько и повернулось»: палец копит градусы, их отрабатывает та же ось;
 // 2 — отсчёты мыши DirectInput, как мышь в ПК-версии (если ось правого стика в игре не читается).
 static int g_cam_touch_mode;
+static float g_cam_axis_y, g_cam_axis_p2;  // что реально ушло в игру (для [cam])
+static int g_cam_axis_dead;                // объявлен здесь для [cam] (определение — в разделе камеры)
 static float g_cam_axis_x, g_cam_axis_p;  // значение оси от пальца (режим 0): пишет UI-поток, читает поток ввода
 void touch_cam_axis(float vx, float vy);   // host/boot/touch.h
 
@@ -665,7 +667,7 @@ void input_init(const char *user_dir)
             (double)g_cam_speed, g_invert_x, g_invert_y);
     {  // режим камеры пальцем (лаунчер: Settings.camTouchMode)
         const char *m = getenv("SNX_CAM_TOUCH");
-        input_set_cam_touch(m ? atoi(m) : 0);
+        input_set_cam_touch(m ? atoi(m) : 2);  // 2 — как мышь ПК: палец сдвинулся — камера повернулась
     }
     const char *e = getenv("SNX_SHOW_FPS");  // поверх Snx.ini: лаунчер Android («Счётчик FPS»)
     if (e)
@@ -1644,6 +1646,13 @@ static void diag_tick(void)
     dinput8_stats(st);
     int x = 0, y = 0;
     int ready = d3d8_window_to_target(0.5f, 0.5f, &x, &y);
+    {  // камера: что отдаём игре и куда она смотрит — по этим числам видно, слушается ли ось
+        int oky = 0, okp = 0;
+        float yaw = d3d8_camera_yaw(&oky), pitch = d3d8_camera_pitch(&okp);
+        fprintf(stderr, "[cam] mode=%d touch=%.2f/%.2f axis=%.2f/%.2f yaw=%.1f pitch=%.1f ok=%d/%d dead=%d\n",
+                g_cam_touch_mode, (double)g_cam_axis_x, (double)g_cam_axis_p, (double)g_cam_axis_y,
+                (double)g_cam_axis_p2, (double)yaw, (double)pitch, oky, okp, g_cam_axis_dead);
+    }
     fprintf(stderr, "[touch] t=%us ticks=%u focus=%x menu=%d latch=%d draws=%d ready=%d center=%d,%d pad=%u taps=%u buttons=%x "
                     "lx=%.2f ly=%.2f | dinput: mouse %u joy %u unacquired %u acquire %u\n",
             now / 1000, g_diag_ticks, user32_focus(), g_menu, g_menu_latch, d3d8_frame_draws(), ready, x, y, g_diag_pad, g_diag_taps, g_touch_applied,
@@ -1669,9 +1678,9 @@ static void diag_tick(void)
 #define CAM_DEG_PER_HEIGHT_P 120.0f  // по вертикали (наклон короче)
 #define CAM_AXIS_RATE 200.0f         // градусов в секунду при полном отклонении оси (для расчёта шага)
 #define CAM_PENDING_MAX 170.0f       // больше за один раз не просим
-#define CAM_MOUSE_COUNTS_PER_HEIGHT 700.0f    // запасной путь мышью, если ось не работает
-#define CAM_MOUSE_COUNTS_PER_HEIGHT_P 470.0f
-#define CAM_MOUSE_MAX_PER_FRAME 14.0f         // меньше за кадр — камера не «перелетает» и не отдаёт назад
+#define CAM_MOUSE_COUNTS_PER_HEIGHT 450.0f    // «как мышь ПК»: 450 отсчётов на высоту экрана
+#define CAM_MOUSE_COUNTS_PER_HEIGHT_P 300.0f
+#define CAM_MOUSE_MAX_PER_FRAME 20.0f
 
 static float g_cam_left_y, g_cam_left_p;  // сколько градусов ещё осталось повернуть
 static float g_cam_yaw_prev, g_cam_pitch_prev;
@@ -1942,6 +1951,8 @@ void input_tick(void)
         if (fabsf(fap) > fabsf(rys))
             rys = fap;
         float cs = g_cam_speed * atomic_load_explicit(&g_look_sens, memory_order_relaxed);
+        g_cam_axis_y = rxs;
+        g_cam_axis_p2 = rys;
         float ax[6] = {lx * g_move_speed, ly * g_move_speed, 0, 0, rxs * cs, rys * cs};
         dinput8_joy(ax, (g_joy_buttons | g_joy_latch) & 0xFFF, pov_of[g_joy_buttons >> 16 & 15]);
         g_joy_latch = 0;

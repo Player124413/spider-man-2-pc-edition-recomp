@@ -79,7 +79,7 @@ class Settings(private val ctx: Context) {
     // Камера пальцем: 0 — виртуальный правый стик под пальцем (место касания — центр, отклонение — сила),
     // 1 — жест «сколько провёл, на столько и повернулось» (градусы), 2 — отсчёты мыши DirectInput.
     var camTouchMode: Int
-        get() = p.getInt("camTouchMode", 0)
+        get() = p.getInt("camTouchMode", 2)  // по умолчанию «как мышь ПК»: камера идёт ровно за пальцем
         set(v) { p.edit().putInt("camTouchMode", v).commit() }
     var camInvX: Boolean
         get() = p.getBoolean("camInvX", false)
