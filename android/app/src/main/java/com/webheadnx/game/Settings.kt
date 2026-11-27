@@ -76,6 +76,11 @@ class Settings(private val ctx: Context) {
     var camSpeed: Float
         get() = p.getFloat("camSpeed", 72f)
         set(v) { p.edit().putFloat("camSpeed", v).commit() }
+    // Камера пальцем: 0 — виртуальный правый стик под пальцем (место касания — центр, отклонение — сила),
+    // 1 — жест «сколько провёл, на столько и повернулось» (градусы), 2 — отсчёты мыши DirectInput.
+    var camTouchMode: Int
+        get() = p.getInt("camTouchMode", 0)
+        set(v) { p.edit().putInt("camTouchMode", v).commit() }
     var camInvX: Boolean
         get() = p.getBoolean("camInvX", false)
         set(v) { p.edit().putBoolean("camInvX", v).commit() }
@@ -139,6 +144,7 @@ class Settings(private val ctx: Context) {
         env("SNX_CAM_DEAD", "%.2f".format(java.util.Locale.ROOT, camDead))
         env("SNX_CAM_SPEED", "%.0f".format(java.util.Locale.ROOT, camSpeed))
         env("SNX_CAM_INV_X", if (camInvX) "1" else "0")
+        env("SNX_CAM_TOUCH", camTouchMode.toString())
         env("SNX_CAM_INV_Y", if (camInvY) "1" else "0")
         env("SNX_PAD_CAMERA", if (padCamera == 1) "joystick" else "mouse")
         if (cheats) env("SNX_CHEATS", "1")

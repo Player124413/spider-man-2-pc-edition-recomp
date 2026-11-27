@@ -39,6 +39,10 @@ object SnxNative {
     @JvmStatic external fun mouse(x: Float, y: Float, down: Int)
     // камера пальцем: смещение пальца в долях высоты экрана (порт сам переводит его в отсчёты мыши)
     @JvmStatic external fun look(dx: Float, dy: Float)
+    // камера пальцем как виртуальный правый стик: значение оси (-1..1) прямо с отклонения пальца
+    @JvmStatic external fun camAxis(vx: Float, vy: Float)
+    // режим камеры пальцем: 0 — виртуальный стик под пальцем, 1 — жест «градусы», 2 — отсчёты мыши
+    @JvmStatic external fun camTouch(mode: Int)
     // чувствительность камеры правого стика: действует сразу, без перезапуска
     @JvmStatic external fun lookSens(v: Float)
     // камера живьём: мёртвая зона, скорость поворота, зеркало осей (правый стик и палец-камера)

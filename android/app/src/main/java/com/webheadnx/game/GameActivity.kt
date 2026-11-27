@@ -227,6 +227,16 @@ class GameActivity : SDLActivity(), InputManager.InputDeviceListener, DisplayMan
             settings.camSpeed = 30f + it * 10f
             camApply()
         })
+        // Камера пальцем: виртуальный стик под пальцем (по умолчанию), жест «градусы» или отсчёты мыши.
+        c.addView(Ui.seekRow(this, L.t("Камера пальцем", "Finger camera"), 2, settings.camTouchMode.coerceIn(0, 2),
+            { i -> when (i) {
+                0 -> L.t("Стик под пальцем", "Stick under finger")
+                1 -> L.t("Жест (градусы)", "Drag (degrees)")
+                else -> L.t("Отсчёты мыши", "Mouse counts")
+            } }) {
+            settings.camTouchMode = it
+            camApply()
+        })
         // Мёртвая зона правого стика геймпада. У пальца её нет и быть не должно: палец тянет камеру напрямую,
         // сколько провёл — на столько и повернулось (как мышь в ПК-версии и как в порте Shrek 2).
         c.addView(Ui.seekRow(this, L.t("Мёртвая зона стика", "Stick dead zone"), 30,
@@ -266,6 +276,7 @@ class GameActivity : SDLActivity(), InputManager.InputDeviceListener, DisplayMan
         try {
             SnxNative.camSet(settings.camDead, settings.camSpeed, settings.camInvX, settings.camInvY)
             SnxNative.lookSens(settings.lookSensitivity)
+            SnxNative.camTouch(settings.camTouchMode)
         } catch (e: UnsatisfiedLinkError) { }
     }
 

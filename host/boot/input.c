@@ -273,6 +273,28 @@ static int g_invert_x;  // зеркалить поворот камеры по �
 // Скорость: ось V даёт aMouseX = 20·V, мышь — 1,2 на отсчёт в секунду (MouseX: Axis aMouseX Speed=6, ×0,01;
 // UInput::ReadInput ×20/Δt), то есть CameraSpeed 72 ≈ 1200 отсчётов/с при полном наклоне; ещё × «Чувствительность
 // камеры» лаунчера (SNX_LOOK_SENS).
+// Режим камеры пальцем (шестерёнка в игре: «Камера пальцем», Settings.camTouchMode):
+// 0 — виртуальный правый стик под пальцем: место касания — центр стика, отклонение пальца — значение оси
+//     (по умолчанию: отклонение — сила, отпустил — ось 0, никаких накоплений и обратной связи);
+// 1 — жест «сколько провёл, на столько и повернулось»: палец копит градусы, их отрабатывает та же ось;
+// 2 — отсчёты мыши DirectInput, как мышь в ПК-версии (если ось правого стика в игре не читается).
+static int g_cam_touch_mode;
+static float g_cam_axis_x, g_cam_axis_p;  // значение оси от пальца (режим 0): пишет UI-поток, читает поток ввода
+void touch_cam_axis(float vx, float vy);   // host/boot/touch.h
+
+void input_set_cam_touch(int mode)
+{
+    if (mode < 0)
+        mode = 0;
+    if (mode > 2)
+        mode = 2;
+    g_cam_touch_mode = mode;
+    touch_cam_axis(0.0f, 0.0f);
+    fprintf(stderr, "[input] finger camera: %s\n",
+            mode == 0 ? "virtual right stick under the finger"
+                      : mode == 1 ? "drag -> degrees -> right stick axis" : "mouse counts (DirectInput)");
+}
+
 // Камера — всегда ось правого стика (без мыши). [Pad] CameraMode остаётся в файле настроек для совместимости.
 // Чувствительность камеры правится на ходу («Настройки» в игре — ползунок без перезапуска): читает поток ввода,
 // пишет UI-поток, поэтому атомарно.
@@ -641,6 +663,10 @@ void input_init(const char *user_dir)
                      getenv("SNX_CAM_INV_Y") && *getenv("SNX_CAM_INV_Y") == '1');
     fprintf(stderr, "[input] camera: deadzone %.2f, speed %.0f, mirror x=%d y=%d\n", (double)g_dead_cam,
             (double)g_cam_speed, g_invert_x, g_invert_y);
+    {  // режим камеры пальцем (лаунчер: Settings.camTouchMode)
+        const char *m = getenv("SNX_CAM_TOUCH");
+        input_set_cam_touch(m ? atoi(m) : 0);
+    }
     const char *e = getenv("SNX_SHOW_FPS");  // поверх Snx.ini: лаунчер Android («Счётчик FPS»)
     if (e)
         d3d8_set_fps_overlay(*e == '1');
@@ -1405,6 +1431,19 @@ void touch_pad(uint32_t buttons, float lx, float ly, float rx, float ry)
 
 // Камера пальцем: палец двигает камеру ровно на столько, на сколько сдвинулся сам — тем же путём, что и мышь
 // ПК в оригинале (aMouseX/aMouseY DirectInput). UI-поток только копит смещение, в мышь его переводит input_tick.
+// Камера пальцем, режим «виртуальный правый стик»: UI-поток отдаёт значение оси (-1..1) прямо с отклонения пальца.
+void touch_cam_axis(float vx, float vy)
+{
+    if (vx > 1.0f) vx = 1.0f;
+    else if (vx < -1.0f) vx = -1.0f;
+    if (vy > 1.0f) vy = 1.0f;
+    else if (vy < -1.0f) vy = -1.0f;
+    pthread_mutex_lock(&g_touch_lock);
+    g_cam_axis_x = vx;
+    g_cam_axis_p = vy;
+    pthread_mutex_unlock(&g_touch_lock);
+}
+
 void touch_look(float dx, float dy)
 {
     pthread_mutex_lock(&g_touch_lock);
@@ -1682,6 +1721,17 @@ static void cam_axis_tick(float dt, float *axy, float *axp)
         g_cam_left_p = 0.0f;
         p = 0.0f;
     }
+    if (g_cam_touch_mode == 0) {  // виртуальный стик: значение оси даёт палец, обратная связь не нужна
+        pthread_mutex_lock(&g_touch_lock);
+        y = g_cam_axis_x;
+        p = g_cam_axis_p;
+        pthread_mutex_unlock(&g_touch_lock);
+        if (g_invert_x)
+            y = -y;
+        if (g_invert_y)
+            p = -p;
+        g_cam_left_y = g_cam_left_p = 0.0f;
+    }
     // Ось просит, а камера не поворачивается — движок её здесь не читает: не крутим камеру этой осью.
     if (fabsf(y) > 0.5f && fabsf(dy) < 0.02f) {
         if (++g_cam_stall_y > 12) {
@@ -1748,8 +1798,8 @@ static void touch_tick(void)
     // «скорости от отклонения». Пока открыто меню игры, касание по свободному месту — щелчок курсором, камеры там нет.
     if (!g_input_frozen && (look_x != 0.0f || look_y != 0.0f)) {
         float wx = (g_invert_x ? -look_x : look_x), wy = (g_invert_y ? -look_y : look_y);
-        if (g_cam_axis_dead) {
-            // запасной путь: ось камеры в игре не работает — как раньше, отсчётами мыши
+        if (g_cam_axis_dead || g_cam_touch_mode == 2) {
+            // отсчёты мыши: запасной путь (ось камеры в игре не работает) или выбранный режим «как мышь ПК»
             static float mx, my;
             mx += wx * CAM_MOUSE_COUNTS_PER_HEIGHT;
             my += wy * CAM_MOUSE_COUNTS_PER_HEIGHT_P;
@@ -1762,8 +1812,8 @@ static void touch_tick(void)
             my -= (float)dy;
             if (dx || dy)
                 dinput8_mouse_move(dx, dy, 0);
-        } else {
-            // основной путь: палец добавляет градусы, их отрабатывает ось правого стика (без мыши)
+        } else if (g_cam_touch_mode == 1) {
+            // жест: палец добавляет градусы, их отрабатывает ось правого стика (без мыши)
             g_cam_left_y += wx * CAM_DEG_PER_HEIGHT;
             g_cam_left_p += wy * CAM_DEG_PER_HEIGHT_P;
             if (g_cam_left_y > CAM_PENDING_MAX) g_cam_left_y = CAM_PENDING_MAX;

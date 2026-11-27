@@ -15,3 +15,6 @@ void input_set_rumble_enabled(int on);
 void input_set_look_sens(float v);
 // камера живьём (шестерёнка в игре): чувствительность, мёртвая зона, скорость поворота, зеркало осей (0 — как есть)
 void input_set_camera(float sens, float dead, float speed, int inv_x, int inv_y);
+// Режим камеры пальцем (шестерёнка): 0 — виртуальный правый стик под пальцем, 1 — жест «градусы»,
+// 2 — отсчёты мыши. Действует сразу, без перезапуска.
+void input_set_cam_touch(int mode);
