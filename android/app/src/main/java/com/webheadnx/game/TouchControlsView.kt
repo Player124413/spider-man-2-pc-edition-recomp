@@ -89,7 +89,14 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
     // силой, отпустил — ось ровно 0. Центр «едет» за пальцем, если тянуть дальше радиуса, — как плавающий стик.
     private var lookAnchorX = 0f
     private var lookAnchorY = 0f
-    private fun lookRadius() = min(w(), h()) * 0.16f
+    private fun lookRadius() = min(w(), h()) * 0.20f
+
+    // Где можно начинать жест камеры: свободная правая часть экрана. Левая половина — зона ходового стика,
+    // и случайное касание рядом с ним больше не крутит камеру. Если ходового стика в раскладке нет — можно везде.
+    private fun lookAllowedAt(x: Float): Boolean {
+        val hasMoveStick = controls.any { it.visible && it.kind == Kind.STICK && !it.rightStick && !it.floating }
+        return !hasMoveStick || x > w() * 0.45f
+    }
 
     private fun lookAxis(x: Float, y: Float) {
         var dx = x - lookAnchorX
@@ -363,7 +370,9 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
             if (!c.visible || c.kind !in kinds) continue
             if (c.kind == Kind.STICK && c.floating) continue
             val d = hypot(x - cx(c), y - cy(c))
-            val reach = radius(c) * (if (c.kind == Kind.BUTTON) 1.12f else 1.25f)
+            // Стик ловит палец с запасом 1.6 радиуса: промах большого пальца мимо видимого круга не должен
+            // превращаться в жест камеры (из-за этого казалось, что «стик двигает и героя, и камеру»).
+            val reach = radius(c) * (if (c.kind == Kind.BUTTON) 1.12f else 1.6f)
             if (d < reach && d / reach < bestD) { best = c; bestD = d / reach }
         }
         return best
@@ -424,6 +433,8 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
                 f.bind = Bind.CONTROL
                 f.ctl = fs
                 startStick(fs, id, x, y, x, y)
+            } else if (!lookAllowedAt(x)) {
+                f.bind = Bind.NONE  // левая половина — зона стика, камера тут не начинается
             } else {
                 f.bind = Bind.LOOK
                 if (lookPointer < 0) {  // второй палец на пустом месте камеру не тянет

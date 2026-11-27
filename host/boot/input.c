@@ -1780,6 +1780,11 @@ static void touch_tick(void)
     }
     g_ntouch_keys = 0;
     pthread_mutex_unlock(&g_touch_lock);
+    if (g_input_frozen) {  // меню игры: камера не крутится — ось от пальца сбрасываем
+        pthread_mutex_lock(&g_touch_lock);
+        g_cam_axis_x = g_cam_axis_p = 0.0f;
+        pthread_mutex_unlock(&g_touch_lock);
+    }
     int x, y;
     g_touch_ready = d3d8_window_to_target(0.5f, 0.5f, &x, &y);
     u32 diff = buttons ^ g_touch_applied;
