@@ -53,9 +53,11 @@ jobs:
   apk:
     runs-on: ubuntu-24.04
     timeout-minutes: 300
-    # contents: read — прогон ничего не публикует (выпуски делает только владелец репозитория вручную)
+    # contents/actions: read — прогон ничего не публикует (выпуски делает только владелец репозитория вручную),
+    # а артефакт своего же прогона читает, чтобы проверить, что скачивается ровно собранный APK
     permissions:
       contents: read
+      actions: read
     env:
       NDK_VERSION: 27.2.12479018
     steps:
@@ -155,6 +157,27 @@ jobs:
           echo "::error title=build errors::$(esc < "$RUNNER_TEMP/err.txt")"
           echo "::error title=build tail::$(grep -v "^\s*at " "$L" | tail -n 60 | cut -c1-300 | esc)"
 
+      # Подпись делаем явно и в каноническом порядке: сначала выравнивание, потом apksigner. Gradle тоже
+      # подписывает (android/app/build.gradle), но здесь подпись строится заново поверх готового файла, поэтому
+      # в APK гарантированно нет ни остатков прежних подписей, ни выравнивания после подписи — именно это
+      # устройство и показывает как «Пакет недействителен (например, повреждён)».
+      - name: 'Подпись APK (явно: zipalign → apksigner, v1+v2+v3)'
+        env:
+          APK: ${{ steps.mode.outputs.apk }}
+        run: |
+          BT="$ANDROID_HOME/build-tools/35.0.0"
+          KS="$RUNNER_TEMP/webhead2-release.p12"
+          base64 -d android/webhead2-release.p12.b64 > "$KS"
+          "$BT/zipalign" -f -P 16 4 "$APK" "$RUNNER_TEMP/aligned.apk"
+          "$BT/apksigner" sign --ks "$KS" --ks-type PKCS12 --ks-pass pass:webhead2-android \
+            --key-pass pass:webhead2-android --ks-key-alias webhead2 \
+            --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true \
+            --min-sdk-version 24 --max-sdk-version 35 \
+            --out "$RUNNER_TEMP/signed.apk" "$RUNNER_TEMP/aligned.apk"
+          cp "$RUNNER_TEMP/signed.apk" "$APK"
+          ls -l "$APK"
+          echo "::notice title=Подпись::APK подписан заново apksigner: zipalign -P 16 4, схемы v1+v2+v3, ключ webhead2"
+
       - name: Проверка APK
         env:
           APK: ${{ steps.mode.outputs.apk }}
@@ -247,3 +270,34 @@ jobs:
 
       # Выпусков в CI нет и не будет: APK публикует только владелец репозитория, вручную и сам.
       # Прогон отдаёт единственное — артефакт (сам APK, archive: false). Токен у прогона только на чтение.
+
+      # Проверка того, что реально скачивается: артефакт забирается обратно и сверяется с собранным APK байт в
+      # байт, а скачанный файл отдельно проверяется apksigner. Если хранилище артефактов отдаёт файл не целиком
+      # или портит его, сборка падает здесь, а не на телефоне («Пакет недействителен»).
+      - name: Проверка артефакта (скачивается байт в байт)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APK: ${{ steps.pack.outputs.path }}
+        run: |
+          BT="$ANDROID_HOME/build-tools/35.0.0"
+          NAME=$(basename "$APK")
+          mkdir -p "$RUNNER_TEMP/dl"
+          for i in $(seq 1 10); do
+            gh run download "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY" -n "$NAME" -D "$RUNNER_TEMP/dl" && break
+            sleep 15
+          done
+          GOT="$RUNNER_TEMP/dl/$NAME"
+          [ -f "$GOT" ] || { echo "::error::артефакт $NAME не скачивается обратно"; exit 1; }
+          A=$(sha256sum "$APK" | cut -d' ' -f1)
+          B=$(sha256sum "$GOT" | cut -d' ' -f1)
+          SIZE=$(stat -c%s "$GOT")
+          [ "$A" = "$B" ] || { echo "::error::скачанный артефакт не совпадает с APK: $B != $A"; exit 1; }
+          "$BT/apksigner" verify --verbose --print-certs "$GOT" > "$RUNNER_TEMP/dl.txt" \
+            || { echo "::error::скачанный артефакт не проходит проверку подписи"; cat "$RUNNER_TEMP/dl.txt"; exit 1; }
+          D=$(sed -n 's/.*certificate SHA-256 digest: //p' "$RUNNER_TEMP/dl.txt" | head -1)
+          echo "::notice title=APK::$NAME — $SIZE байт, sha256 $A, подпись $D, артефакт скачивается байт в байт"
+          {
+            echo "### Артефакт"
+            echo ""
+            echo "\`$NAME\` — $SIZE байт, sha256 \`$A\`, ключ \`$D\`, скачивается байт в байт"
+          } >> "$GITHUB_STEP_SUMMARY"
