@@ -844,7 +844,27 @@ void game_menu_frame(unsigned bb_w, unsigned bb_h)
     g_draw_has_tabs = g_tabs != 0;
     last_page = page;
     pthread_mutex_lock(&g_lock);
-    g_open = page != 0;
+    // Меню считаем открытым, только если на активной странице есть хоть один элемент ввода. После паузы и особенно
+    // при старте новой игры игра нет-нет да и оставит ActivePage указателем на уже закрытую (или целиком скрытую)
+    // страницу: порт из-за этого оставался в «режиме меню» — стик вёл курсор (то есть в геймплее крутил камеру),
+    // хотя игра уже идёт, и получалось «одним стиком и персонаж, и камера». Закрытая страница элементов не отдаёт
+    // (`collect` берёт только видимые и принимающие ввод), поэтому состояние снимается само. Три кадра терпим:
+    // только что открытая страница может успеть собрать элементы не с первого кадра.
+    {
+        static int empty_frames;
+        int open_now = page != 0;
+        if (open_now && g_n == 0) {
+            if (empty_frames < 3)
+                empty_frames++;
+            else {
+                open_now = 0;
+                if (getenv("SNX_LOG_MENU"))
+                    fprintf(stderr, "[menu] page %08x has no items — treat as closed\n", page);
+            }
+        } else
+            empty_frames = 0;
+        g_open = open_now;
+    }
     g_focus_kind = g_draw_focus_kind;
     g_has_back = g_back_i >= 0;
     if (g_has_back)

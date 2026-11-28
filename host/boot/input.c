@@ -1904,8 +1904,14 @@ void input_tick(void)
         g_nav_next = SDL_GetTicks() + 120;
         nav(g_nav_dir, 1);
     }
-    // меню: оба стика -> курсор (смещения мыши DirectInput); курсор виден, когда им водят
-    float cx = fabsf(lx) > fabsf(rx) ? lx : rx, cy = fabsf(ly) > fabsf(ry) ? ly : ry;
+    // Меню: курсор водят стики геймпада (смещения мыши DirectInput). Экранные стики сюда не идут намеренно:
+    // ими водят героя (клавиши W/S/A/D), а их оси в геймплее означали бы поворот камеры — из-за этого и
+    // появлялся баг «одним стиком и персонаж, и камера», когда порт по ошибке оставался в режиме меню
+    // (например, после паузы или старта новой игры). Геймпад — только физический (pad_axis), без g_touch_ax.
+    static float mlx, mly, mrx, mry;
+    stick(pad_axis(SDL_CONTROLLER_AXIS_LEFTX), pad_axis(SDL_CONTROLLER_AXIS_LEFTY), 0, g_dead, &mlx, &mly);
+    stick(pad_axis(SDL_CONTROLLER_AXIS_RIGHTX), pad_axis(SDL_CONTROLLER_AXIS_RIGHTY), 2, g_dead_cam, &mrx, &mry);
+    float cx = fabsf(mlx) > fabsf(mrx) ? mlx : mrx, cy = fabsf(mly) > fabsf(mry) ? mly : mry;
     if (cx == 0.0f && cy == 0.0f)
         return;
     game_menu_cursor(0);  // курсор не показываем: пункты нажимаются кнопками и тапом
