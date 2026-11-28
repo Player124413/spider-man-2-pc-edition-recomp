@@ -312,6 +312,9 @@ class LauncherActivity : Activity() {
         })
         c.addView(Ui.label(this, L.t("В игре — шестерёнка в левом верхнем углу. Палец на свободном месте экрана — камера.", "In game: the gear in the top-left corner. A finger on a free area of the screen moves the camera."),
             dim = true, size = 12f).apply { setPadding(0, Ui.dp(this@LauncherActivity, 6f), 0, 0) })
+        c.addView(Ui.switchRow(this, L.t("Камера держит угол", "Camera holds its angle"),
+            L.t("Не даёт камере возвращаться назад после поворота", "Keeps the camera from snapping back after a turn"),
+            s.camHold) { s.camHold = it })
         c.addView(Ui.switchRow(this, L.t("Экранное управление", "Touch controls"), null, s.touchEnabled) { s.touchEnabled = it })
         c.addView(Ui.switchRow(this, L.t("Прятать при геймпаде", "Hide with a gamepad"), L.t("Подключён геймпад — кнопки на экране не нужны", "A gamepad is connected — no need for on-screen buttons"),
             s.hideWithGamepad) { s.hideWithGamepad = it })

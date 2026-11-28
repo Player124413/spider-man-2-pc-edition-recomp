@@ -95,6 +95,14 @@ JNIEXPORT void JNICALL JNI_FN(camMirror)(JNIEnv *env, jclass cls, jboolean inv_x
     input_set_cam_mirror(inv_x ? 1 : 0, inv_y ? 1 : 0);
 }
 
+// «Держать угол»: камера остаётся там, куда её поставил игрок (переключатель в шестерёнке)
+JNIEXPORT void JNICALL JNI_FN(camHold)(JNIEnv *env, jclass cls, jboolean on)
+{
+    (void)env;
+    (void)cls;
+    input_set_cam_hold(on ? 1 : 0);
+}
+
 // Частота экрана (режим, выбранный GameActivity под ограничение FPS, или смена частоты системой) и ограничение
 JNIEXPORT void JNICALL JNI_FN(display)(JNIEnv *env, jclass cls, jfloat hz, jint fps_cap)
 {

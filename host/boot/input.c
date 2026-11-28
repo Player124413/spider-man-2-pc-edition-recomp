@@ -281,7 +281,13 @@ static int g_invert_x;  // зеркалить поворот камеры по �
 #define CAM_EPS 0.08f               // градусы: остаток меньше — поворот закончен
 #define CAM_COUNTS_MAX 60           // отсчётов мыши за кадр (быстрый жест не «догоняется» полсекунды)
 #define CAM_STALL_FRAMES 25         // кадров «просим, а камера не поворачивается» — меняем выход
-#define CAM_FORGET_MS 800           // палец не трогали — остаток не держим (с автодоворотом игры не воюем)
+#define CAM_FORGET_MS 800           // палец не трогали — накопленный остаток забываем
+#define CAM_HOLD_EPS 0.5f           // градусы: меньше — камера «на месте», не трогаем
+#define CAM_HOLD_GAIN 0.6f          // доля ошибки, которую поправляем за кадр (мягко, без рывков)
+#define CAM_HOLD_MAX_DEG 25.0f      // ошибка больше — камеру увела игра (ролик/скрипт): не воюем
+
+static int g_cam_hold = 1;              // держать угол: камера не возвращается сама (шестерёнка)
+static float g_cam_hold_y, g_cam_hold_p;
 static float g_cam_pend_y, g_cam_pend_p;   // сколько градусов ещё повернуть
 static float g_cam_deg_per_count = 0.05f;  // градусов на отсчёт мыши (измеряется по факту)
 static float g_cam_rate_axis = 150.0f;     // градусов в секунду при полной оси (измеряется по факту)
@@ -654,7 +660,8 @@ void input_init(const char *user_dir)
         input_set_look_sens((float)atof(ls));
     input_set_cam_mirror(getenv("SNX_CAM_INV_X") && *getenv("SNX_CAM_INV_X") == '1',
                          getenv("SNX_CAM_INV_Y") && *getenv("SNX_CAM_INV_Y") == '1');
-    fprintf(stderr, "[input] camera: sensitivity %.2f, mirror x=%d y=%d\n",
+    input_set_cam_hold(!getenv("SNX_CAM_HOLD") || *getenv("SNX_CAM_HOLD") != '0');
+    fprintf(stderr, "[input] camera: hold angle=%d, sensitivity %.2f, mirror x=%d y=%d\n", g_cam_hold,
             (double)atomic_load_explicit(&g_look_sens, memory_order_relaxed), g_invert_x, g_invert_y);
     const char *e = getenv("SNX_SHOW_FPS");  // поверх Snx.ini: лаунчер Android («Счётчик FPS»)
     if (e)
@@ -1657,6 +1664,12 @@ static void diag_tick(void)
 static float g_cam_yaw_prev, g_cam_pitch_prev;
 static int g_cam_have;
 
+void input_set_cam_hold(int on)
+{
+    g_cam_hold = on != 0;
+    g_cam_hold_y = g_cam_hold_p = 0.0f;
+}
+
 static float cam_wrapf(float a)  // угол камеры в -180..180
 {
     while (a > 180.0f) a -= 360.0f;
@@ -1685,8 +1698,28 @@ static void cam_tick(float dt, float *axy, float *axp)
         g_cam_pend_y -= dy;  // столько камера уже повернула (в том числе сама) — столько снимаем с просьбы
         g_cam_pend_p -= dp;
     }
-    if ((u32)(SDL_GetTicks() - g_cam_last_touch) > CAM_FORGET_MS)  // палец давно не трогали — не воюем
+    if ((u32)(SDL_GetTicks() - g_cam_last_touch) > CAM_FORGET_MS)  // палец давно не трогали — остаток забываем
         g_cam_pend_y = g_cam_pend_p = 0.0f;
+    // «Держать угол»: игра любит доворачивать камеру сама (за спину герою, за его поворотом) — из-за этого камера
+    // «отщёлкивалась назад» и казалось, что её крутит стик. Пока палец камеру не трогает, порт мягко возвращает её
+    // туда, куда её поставил игрок (доля ошибки за кадр, CAM_HOLD_GAIN). Большую ошибку (ролик, скриптовая камера)
+    // не трогаем — просто переставляем цель на текущее положение.
+    if (g_cam_hold && g_cam_have) {
+        if (g_cam_pend_y != 0.0f || g_cam_pend_p != 0.0f || (u32)(SDL_GetTicks() - g_cam_last_touch) < 200) {
+            g_cam_hold_y = yaw;  // цель — куда камеру поставили
+            g_cam_hold_p = pitch;
+        } else {
+            float ey = cam_wrapf(yaw - g_cam_hold_y), ep = pitch - g_cam_hold_p;
+            if (fabsf(ey) > CAM_HOLD_MAX_DEG)
+                g_cam_hold_y = yaw;
+            else if (fabsf(ey) > CAM_HOLD_EPS)
+                g_cam_pend_y -= ey * CAM_HOLD_GAIN;
+            if (fabsf(ep) > CAM_HOLD_MAX_DEG)
+                g_cam_hold_p = pitch;
+            else if (fabsf(ep) > CAM_HOLD_EPS)
+                g_cam_pend_p -= ep * CAM_HOLD_GAIN;
+        }
+    }
     if (g_cam_pend_y > CAM_MAX_DEG) g_cam_pend_y = CAM_MAX_DEG;
     else if (g_cam_pend_y < -CAM_MAX_DEG) g_cam_pend_y = -CAM_MAX_DEG;
     if (g_cam_pend_p > CAM_MAX_DEG * 0.5f) g_cam_pend_p = CAM_MAX_DEG * 0.5f;
@@ -1715,8 +1748,8 @@ static void cam_tick(float dt, float *axy, float *axp)
         float turned = fabsf(dy) > fabsf(dp) ? fabsf(dy) : fabsf(dp);
         if (sent > 1 && turned > 0.0005f) {  // калибровка: сколько градусов даёт один отсчёт
             float m = turned / (float)sent;
-            if (m > 0.0005f && m < 0.6f)
-                g_cam_deg_per_count += (m - g_cam_deg_per_count) * 0.25f;
+            if (m > 0.002f && m < 0.2f)  // правдоподобные значения, иначе — шум кадра и дрожание камеры
+                g_cam_deg_per_count += (m - g_cam_deg_per_count) * 0.15f;
         }
         // отсчёты уходят, а камера не поворачивается — мышь в этой игре не читается, переходим на ось стика
         if (sent >= 6 && turned < 0.0005f && g_cam_pend_y != 0.0f) {

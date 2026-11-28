@@ -223,6 +223,13 @@ class GameActivity : SDLActivity(), InputManager.InputDeviceListener, DisplayMan
             settings.lookSensitivity = 0.1f + it / 10f
             camApply()
         })
+        // «Держать угол»: без этого игра сама доворачивает камеру за спину герою — камера «отщёлкивается назад»
+        c.addView(Ui.switchRow(this, L.t("Камера держит угол", "Camera holds its angle"),
+            L.t("Не даёт камере возвращаться назад после поворота", "Keeps the camera from snapping back after a turn"),
+            settings.camHold) {
+            settings.camHold = it
+            camApply()
+        })
         c.addView(Ui.switchRow(this, L.t("Зеркалить поворот (влево/вправо)", "Mirror turn (left/right)"), null,
             settings.camInvX) {
             settings.camInvX = it
@@ -253,6 +260,7 @@ class GameActivity : SDLActivity(), InputManager.InputDeviceListener, DisplayMan
     private fun camApply() {
         try {
             SnxNative.camMirror(settings.camInvX, settings.camInvY)
+            SnxNative.camHold(settings.camHold)
             SnxNative.lookSens(settings.lookSensitivity)
         } catch (e: UnsatisfiedLinkError) { }
     }

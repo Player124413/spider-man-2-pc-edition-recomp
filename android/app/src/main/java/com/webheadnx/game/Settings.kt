@@ -77,6 +77,11 @@ class Settings(private val ctx: Context) {
     var camInvY: Boolean
         get() = p.getBoolean("camInvY", false)
         set(v) { p.edit().putBoolean("camInvY", v).commit() }
+    // «Держать угол»: игра любит сама доворачивать камеру за спину герою — из-за этого она «отщёлкивалась назад».
+    // Включено по умолчанию: порт мягко возвращает камеру туда, куда её поставил игрок.
+    var camHold: Boolean
+        get() = p.getBoolean("camHold", true)
+        set(v) { p.edit().putBoolean("camHold", v).commit() }
     var potionSlot: Int  // слот зелья (1–9) у кнопки «Зелья»: стрелки рядом с ней, короткое нажатие — выпить
         get() = p.getInt("potionSlot", 1).coerceIn(1, 9)
         set(v) { p.edit().putInt("potionSlot", v.coerceIn(1, 9)).apply() }
@@ -128,6 +133,7 @@ class Settings(private val ctx: Context) {
         env("SNX_SHOW_FPS", if (showFps) "1" else "0")
         env("SNX_FILE_CACHE_MB", fileCacheMb.toString())
         env("SNX_LOOK_SENS", "%.2f".format(java.util.Locale.ROOT, lookSensitivity))  // и камера правым стиком
+        env("SNX_CAM_HOLD", if (camHold) "1" else "0")
         env("SNX_CAM_INV_X", if (camInvX) "1" else "0")
         env("SNX_CAM_INV_Y", if (camInvY) "1" else "0")
         if (cheats) env("SNX_CHEATS", "1")

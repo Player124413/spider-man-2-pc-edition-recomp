@@ -42,6 +42,8 @@ object SnxNative {
     @JvmStatic external fun look(dx: Float, dy: Float)
     // чувствительность камеры правого стика: действует сразу, без перезапуска
     @JvmStatic external fun lookSens(v: Float)
+    // «держать угол»: камера остаётся там, куда её поставил игрок (игра любит доворачивать её сама)
+    @JvmStatic external fun camHold(on: Boolean)
     // камера живьём: зеркало осей (чувствительность — lookSens)
     @JvmStatic external fun camMirror(invX: Boolean, invY: Boolean)
     // частота экрана и ограничение FPS: равны — кадры отмеряет vsync (platform/window.c plat_set_display)
