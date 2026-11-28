@@ -379,17 +379,118 @@ void rt_eh_continue(CPU *c, u32 target)
         eh_jump(c, target);
 }
 
+// ------------------------------------------------- вызовы в hotpatch-пролог (MSVC /hotpatch) ---------------
+// msvcr71 собран с /hotpatch: перед функцией лежит 5 байт NOP, а сама функция начинается с mov edi,edi (8B FF).
+// Часть кода зовёт функцию не на вход, а на вход+2 (пропустив mov edi,edi) или на вход+5 (пропустив NOP-площадку):
+// такого адреса в таблице функций нет, и раньше это был «call to unknown guest address» — то есть вылет на ровном
+// месте (в логах: TRAP at 13002af3 у msvcr71, General protection fault). Разница только в двух байтах NOP-площадки
+// — зовём настоящий вход, поведение то же, а вылета нет. И наоборот: если откомпилирован вход+2, а зовут вход, тоже
+// ведём на откомпилированный адрес.
+static guest_fn hotpatch_lookup(u32 target, u32 *via, int *native)
+{
+    if (target < 6 || target >= RT_WINDOW)
+        return NULL;
+    const u8 *m = g_mem;
+    const u8 *p = m + target - 2;  // цель = вход + 2, вход начинается с mov edi,edi
+    if (p[0] == 0x8B && p[1] == 0xFF) {
+        guest_fn fn = rt_lookup_k(target - 2, native);
+        if (fn) {
+            *via = target - 2;
+            return fn;
+        }
+    }
+    p = m + target - 5;  // цель = вход + 5, вход начинается с пяти NOP — площадка /hotpatch
+    int nop = 1;
+    for (int i = 0; i < 5; i++)
+        if (p[i] != 0x90)
+            nop = 0;
+    if (nop) {
+        guest_fn fn = rt_lookup_k(target - 5, native);
+        if (fn) {
+            *via = target - 5;
+            return fn;
+        }
+    }
+    p = m + target;  // цель — вход с mov edi,edi, а откомпилирован вход+2
+    if (p[0] == 0x8B && p[1] == 0xFF) {
+        guest_fn fn = rt_lookup_k(target + 2, native);
+        if (fn) {
+            *via = target + 2;
+            return fn;
+        }
+    }
+    return NULL;
+}
+
+// SNX_UNKNOWN_CALL=stub (Android-сборка по умолчанию): неизвестный вызов внутри известного модуля не валит игру, а
+// считается «функция вернула 0». Лучше остаться в игре с кривым кадром, чем вылететь у половины устройств; каждый
+// такой адрес пишется в лог один раз, и по нему потом добавляется настоящая функция (или seed рекомпилятора).
+static int unknown_call_stub(void)
+{
+    static int mode = -1;
+    if (mode < 0) {
+        const char *e = getenv("SNX_UNKNOWN_CALL");
+        mode = !e || strcmp(e, "trap") != 0;  // по умолчанию — заглушка, SNX_UNKNOWN_CALL=trap вернёт вылет
+    }
+    return mode;
+}
+
+static void note_unknown_call(u32 target, u32 caller)
+{
+    static u32 seen[16];
+    static int n, hits;
+    for (int i = 0; i < n; i++)
+        if (seen[i] == target)
+            return;
+    if (n < 16) {
+        seen[n++] = target;
+        char sym[96], csym[96];
+        rt_symbolize(target, sym, sizeof sym);
+        rt_symbolize(caller, csym, sizeof csym);
+        fprintf(stderr, "[rt] unknown call %08x (%s) from %s — returning 0\n", target, sym, csym);
+        if (++hits > 64)
+            fprintf(stderr, "[rt] unknown call %08x: too many, see [rt] lines above\n", target);
+    }
+}
+
 void rt_call(CPU *c, u32 target)
 {
     int native = 0;
     guest_fn fn = rt_lookup_k(target, &native);
     if (!fn) {
+        u32 via = 0;
+        int hnative = 0;
+        guest_fn alt = hotpatch_lookup(target, &via, &hnative);
+        if (alt) {  // цель внутри hotpatch-площадки — зовём настоящий вход функции
+            static u32 logged[8];
+            static int nlog;
+            int known = 0;
+            for (int i = 0; i < nlog; i++)
+                if (logged[i] == target)
+                    known = 1;
+            if (!known && nlog < 8) {
+                logged[nlog++] = target;
+                char sym[96];
+                rt_symbolize(target, sym, sizeof sym);
+                fprintf(stderr, "[rt] call %08x (%s) is a hotpatch prologue offset — calling function entry %08x\n",
+                        target, sym, via);
+            }
+            rt_invoke(c, alt, hnative);
+            return;
+        }
         rt_jmp *j = setjmp_continuation(c, target);
         if (j) {
             eh_drop_below(j);
             host_longjmp(j);
         }
         eh_jump(c, target);
+        if (unknown_call_stub() && target < RT_WINDOW) {
+            u32 caller = (c->esp >= 0x10000 && c->esp + 8 <= RT_WINDOW) ? rd32(g_mem, c->esp) : 0;
+            note_unknown_call(target, caller);
+            c->esp += 4;  // снимаем адрес возврата: как будто функция вернулась со значением 0
+            c->eax = 0;
+            return;
+        }
         rt_trap(c, target, "call to unknown guest address");
         return;
     }
