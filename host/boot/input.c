@@ -256,6 +256,8 @@ static char g_snx_path[1100];
 static u32 g_map[2][PB_N];  // [слой][кнопка] -> виртуальная клавиша или T_*; 0 — джойстик (в слое — ничего)
 static u32 g_held[PB_N];    // что нажала кнопка: отпускается то же, даже если сменились слой или режим
 static int g_layer_btn = -1, g_layer, g_menu;
+// признак настоящего 3D-геймплея и «пешка жива» (для [touch]): по ним касания идут в камеру или в мышь
+static int g_scene3d_frames, g_scene3d, g_diag_pawn;
 // Ввод игры заморожен: настоящее GUI-меню игры или явный режим «Меню». Заставка главного меню и её защёлка
 // (g_menu_latch) только переводят касания в мышь (g_touch_menu_pass) — стик, кнопки и камера при этом живут.
 static int g_input_frozen;
@@ -1658,9 +1660,9 @@ static void diag_tick(void)
                 g_cam_read_moves,
                 (double)atomic_load_explicit(&g_look_sens, memory_order_relaxed));
     }
-    fprintf(stderr, "[touch] t=%us ticks=%u focus=%x menu=%d latch=%d draws=%d ready=%d center=%d,%d pad=%u taps=%u buttons=%x "
+    fprintf(stderr, "[touch] t=%us ticks=%u focus=%x menu=%d latch=%d draws=%d ready=%d center=%d,%d pad=%u taps=%u ingame=%d pawn=%d scene=%d buttons=%x "
                     "lx=%.2f ly=%.2f | dinput: mouse %u joy %u unacquired %u acquire %u\n",
-            now / 1000, g_diag_ticks, user32_focus(), g_menu, g_menu_latch, d3d8_frame_draws(), ready, x, y, g_diag_pad, g_diag_taps, g_touch_applied,
+            now / 1000, g_diag_ticks, user32_focus(), g_menu, g_menu_latch, d3d8_frame_draws(), ready, x, y, g_diag_pad, g_diag_taps, g_touch_in_game, g_diag_pawn, g_scene3d, g_touch_applied,
             (double)g_touch_ax[0], (double)g_touch_ax[1], st[0], st[1], st[2], st[3]);
     for (int i = 0; i < MAX_PADS; i++)  // геймпады: правый стик сейчас и число событий осей (камера «пропадает»)
         if (g_pads[i].id >= 0 && g_pads[i].events)
@@ -1718,7 +1720,12 @@ static void cam_tick(float dt, float *axy, float *axp)
         // dy/dp — сколько камера реально повернула за кадр: по ним калибруется «градусов на отсчёт» и ловится
         // «мышь/ось камеру не крутит». Из просьбы они НЕ вычитаются: иначе порт крутит камеру, пока она не доедет
         // до угла, и после пальца камера продолжает ехать ещё полсекунды (ровно та жалоба «неудобно»).
-        if (fabsf(dy) > 0.02f || fabsf(dp) > 0.02f)
+        // Скачок на десятки градусов за кадр — это не поворот камеры, а смена сцены (ролик, другой вид, кадр без
+        // нормальной матрицы вида: в логе с телефона углы прыгали 0/0 → 180/90). Такой кадр не считаем ни
+        // поворотом камеры, ни поводом для калибровки, иначе «живое чтение» никогда не признается мёртвым.
+        if (fabsf(dy) > 45.0f || fabsf(dp) > 30.0f)
+            dy = dp = 0.0f;
+        else if (fabsf(dy) > 0.02f || fabsf(dp) > 0.02f)
             g_cam_read_moves++;
     }
     if ((u32)(SDL_GetTicks() - g_cam_last_touch) > CAM_FORGET_MS)  // палец давно не трогали — остаток забываем
@@ -1920,6 +1927,27 @@ static float axis_of(int a)
     float p = pad_axis(a), t = a < 4 ? g_touch_ax[a] : 0.0f;
     return fabsf(t) > fabsf(p) ? t : p;
 }
+// Идёт ли настоящий геймплей — по картинке, а не только по живой пешке. Поиск PlayerController/Pawn на Android
+// может не срабатывать (лог с телефона: menu=1 latch=1 весь геймплей, стик и кнопки работают, а все драги по
+// пустому месту уходили в виртуальную мышь — камеру пальцем было не повернуть). Признак геймплея виден и без
+// объектов игры: в 3D-сцене игра делает десятки вызовов рисования за кадр, а в заставке/ролике/меню — 1–3.
+static int scene3d_active(int gui_menu)
+{
+    if (gui_menu) {  // настоящее GUI-меню — это не геймплей, даже если сцена под ним ещё рисуется
+        g_scene3d_frames = 0;
+        g_scene3d = 0;
+        return 0;
+    }
+    if (d3d8_frame_draws() >= 16) {
+        if (g_scene3d_frames < 30)
+            g_scene3d_frames++;
+    } else if (g_scene3d_frames > 0) {
+        g_scene3d_frames -= 2;  // гистерезис: короткая пауза кадра не снимает признак
+    }
+    g_scene3d = g_scene3d_frames >= 15;  // ≈0.25 с живой 3D-сцены
+    return g_scene3d;
+}
+
 
 void input_tick(void)
 {
@@ -1959,11 +1987,18 @@ void input_tick(void)
         g_menu_latch = 1;
     if (menu_movie && gui_menu)
         g_menu_latch = 0;
-    // Защёлка держится до живой пешки или до явного выхода кнопкой «Меню». Любой клик по пункту
-    // (Options/Credits внутри меню) не должен её снимать: иначе после возврата мышь «зависает».
-    if (game_player_active())
+    // Защёлка держится до живой пешки, до видимой 3D-сцены или до явного выхода кнопкой «Меню». Любой клик по
+    // пункту (Options/Credits внутри меню) не должен её снимать: иначе после возврата мышь «зависает».
+    int pawn_alive = game_player_active() != 0;
+    g_diag_pawn = pawn_alive;
+    int scene = scene3d_active(gui_menu);
+    int in_game = pawn_alive || scene;
+    if (in_game)
         g_menu_latch = 0;
-    g_touch_in_game = game_player_active() != 0;
+    if (in_game != g_touch_in_game && log_touch())  // видно в логе, почему касания идут в камеру или в мышь
+        fprintf(stderr, "[touch] gameplay %s (pawn=%d scene3d=%d draws=%d)\n", in_game ? "on" : "off", pawn_alive,
+                scene, d3d8_frame_draws());
+    g_touch_in_game = in_game;
     int menu = gui_menu || g_menu_override || menu_movie || g_menu_latch;
     // Замораживает ввод игры только настоящее GUI-меню и явный режим «Меню». Заставка главного меню и защёлка
     // нужны лишь для того, чтобы касания по пустому месту шли в мышь: если защёлка не снимется (игра не сообщила
@@ -2073,7 +2108,7 @@ static int mouse_allowed(void)
     }
     if (force)
         return 1;
-    return g_menu || !game_player_active();
+    return g_menu || !g_touch_in_game;  // тот же признак геймплея, что и у касаний (пешка ИЛИ живая 3D-сцена)
 }
 
 void input_event(const void *p)
