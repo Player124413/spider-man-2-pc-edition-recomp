@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="snx_bg">#FF0B1020</color>
+    <color name="snx_card">#FF121B2E</color>
+    <color name="snx_accent">#FFE62429</color>
+    <color name="snx_accent_dark">#FF8C101C</color>
+    <color name="snx_text">#FFF2F5FF</color>
+    <color name="snx_text_dim">#FF9FACC4</color>
+    <color name="ic_launcher_background">#FFB01524</color>
+</resources>

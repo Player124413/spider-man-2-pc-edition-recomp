@@ -1,0 +1,151 @@
+// Приложение: лаунчер (com.webheadnx.game.LauncherActivity) и игра (GameActivity — SDLActivity в отдельном
+// процессе). Нативная часть — корневой CMakeLists.txt (ANDROID: cmake/android.cmake): libSDL2.so + libmain.so
+// со сгенерированным кодом из build/gen. Один APK на обе локализации: eng/rus различаются только файлами
+// игры (System/*.int), лаунчер определяет язык сам, отдельных flavor'ов нет.
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+def repoRoot = file('../..')
+def depsDir = project.hasProperty('snx.deps') ? file(project.property('snx.deps')) : new File(repoRoot, 'build/android-deps')
+def sdlJava = new File(depsDir, 'SDL/android-project/app/src/main/java')
+if (!sdlJava.exists()) {
+    throw new GradleException("Нет ${sdlJava}: сначала запусти tools/android_deps.sh")
+}
+
+// versionCode — минуты от 2026-01-01 до времени последнего коммита: растёт с каждым коммитом и больше любого
+// прежнего (раньше было число коммитов, ≤ 19), поэтому новая сборка всегда ставится поверх старой, а не
+// «Приложение не установлено» из-за понижения версии. versionName — 0.1.0-<число коммитов>, как в именах APK.
+// -Psnx.versionCode=N — вручную. В CI нужен полный клон (fetch-depth: 0), иначе число коммитов — 1.
+def git = { List<String> args, int fallback ->
+    try {
+        def p = (['git', '-C', repoRoot.absolutePath] + args).execute()
+        def out = p.text.trim()
+        p.waitFor() == 0 && out ? out.toLong() : fallback
+    } catch (Exception ignored) {
+        fallback
+    }
+}
+def snxCommits = git(['rev-list', '--count', 'HEAD'], 1)
+def snxCommitMinutes = Math.max(1000L, (git(['log', '-1', '--format=%ct'], 0) - 1767225600L).intdiv(60) as long)
+def snxVersionCode = project.hasProperty('snx.versionCode') ? project.property('snx.versionCode').toString().toInteger() : (snxCommitMinutes as int)
+
+android {
+    namespace 'com.webheadnx.game'
+    compileSdk 35
+    ndkVersion '27.2.12479018'
+
+    defaultConfig {
+        applicationId 'com.webheadnx.game'
+        minSdk 24          // Android 7.0: OpenGL ES 3.0 есть везде, AAudio — с 8.1 (иначе OpenSL ES)
+        targetSdk 35
+        versionCode snxVersionCode
+        versionName "0.1.0-${snxCommits}"
+        ndk {
+            abiFilters 'arm64-v8a'  // окно гостя — 4 ГБ адресов: только 64-битные телефоны
+        }
+        externalNativeBuild {
+            cmake {
+                arguments "-DSNX_ANDROID_DEPS=${depsDir.absolutePath}", '-DANDROID_STL=c++_static',
+                          '-DANDROID_PLATFORM=android-24', '-DCMAKE_BUILD_TYPE=Release'
+                targets 'snx_boot', 'SDL2'
+            }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path new File(repoRoot, 'CMakeLists.txt')
+            version '3.31.6'
+            buildStagingDirectory new File(repoRoot, 'build/android-cxx')
+        }
+    }
+
+    sourceSets {
+        main {
+            java.srcDirs += sdlJava  // org.libsdl.app.* — из исходников SDL той же версии, что и libSDL2.so
+        }
+    }
+
+    // .so пакуются сжатыми (extractNativeLibs=true): это классическая установка «с распаковкой» — самый
+    // совместимый вариант, его понимают все установщики без всякой возни с выравниванием нативных библиотек,
+    // и APK получается примерно в 2,5 раза меньше (меньше шансов скачать файл не целиком, а обрезанный файл
+    // Android показывает как «Пакет повреждён»).
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
+
+    // Подпись — своим ключом, отличным от ключа Shrek 2: приложение ставится рядом с com.shreknx.game, а не
+    // вместо него. По умолчанию — ключ из репозитория (android/webhead2-release.p12.b64, пароль открыт: подписать
+    // «обновление» им может любой — см. docs/ANDROID.md); свой — android/keystore.properties или переменные
+    // SNX_KEYSTORE* (секреты CI). Не меняйте ключ/пакет в обновлениях, иначе Android не заменит старую версию.
+    def ksProps = new Properties()
+    def ksFile = new File(projectDir.parentFile, 'keystore.properties')
+    if (System.getenv('SNX_KEYSTORE')) {
+        ksProps['storeFile'] = System.getenv('SNX_KEYSTORE')
+        ksProps['storePassword'] = System.getenv('SNX_KEYSTORE_PASSWORD') ?: ''
+        ksProps['storeType'] = System.getenv('SNX_KEYSTORE_TYPE') ?: 'PKCS12'
+        ksProps['keyAlias'] = System.getenv('SNX_KEY_ALIAS') ?: 'webhead2'
+        ksProps['keyPassword'] = System.getenv('SNX_KEY_PASSWORD') ?: ksProps['storePassword']
+    } else if (ksFile.exists()) {
+        ksFile.withInputStream { ksProps.load(it) }
+    } else {
+        // ключ хранится текстом (base64), чтобы tools/check_public.py не пропускал в репозиторий бинарники
+        def p12 = new File(layout.buildDirectory.get().asFile, 'webhead2-release.p12')
+        p12.parentFile.mkdirs()
+        p12.bytes = Base64.mimeDecoder.decode(new File(projectDir.parentFile, 'webhead2-release.p12.b64').text)
+        ksProps['storeFile'] = p12.absolutePath
+        ksProps['storeType'] = 'PKCS12'
+        ksProps['storePassword'] = 'webhead2-android'
+        ksProps['keyAlias'] = 'webhead2'
+        ksProps['keyPassword'] = 'webhead2-android'
+    }
+    signingConfigs {
+        snx {
+            def f = new File(ksProps['storeFile'].toString())
+            storeFile f.isAbsolute() ? f : new File(projectDir.parentFile, ksProps['storeFile'].toString())
+            def fType = ksProps['storeType'] ?: (f.name.toLowerCase().endsWith('.p12') || f.name.toLowerCase().endsWith('.pfx') ? 'PKCS12' : 'JKS')
+            storeType fType
+            storePassword ksProps['storePassword']
+            keyAlias ksProps['keyAlias']
+            keyPassword ksProps['keyPassword']
+            // AGP 8 по умолчанию выключает v1 (minSdk 24) и может не включить v3. Файловые менеджеры
+            // Android 13–15 тогда отвечают «Пакет недействителен». Подписываем всеми тремя схемами.
+            enableV1Signing true
+            enableV2Signing true
+            enableV3Signing true
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.snx
+        }
+        debug {
+            signingConfig signingConfigs.snx  // тот же ключ: отладочная сборка ставится поверх релизной
+            // сгенерированный код без оптимизаций слишком медленный даже для отладки лаунчера
+            externalNativeBuild { cmake { arguments '-DCMAKE_BUILD_TYPE=Release' } }
+        }
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+    // .so — сжатыми в APK (классическая установка «с распаковкой»): самый совместимый для установщиков
+    // вариант, и APK примерно в 2,5 раза меньше (см. packaging выше). Несжатые .so давали APK под 7 МБ —
+    // такой файл чаще приходит обрезанным, а обрезанный Android показывает как «Пакет повреждён».
+    lint {
+        abortOnError false
+    }
+}

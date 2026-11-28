@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Лаунчер — в основном процессе; игра — в своём (:game): при выходе из игры процесс завершается целиком
+     (exit() в коде игры), лаунчер остаётся, а следующий запуск начинается с чистого состояния. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    android:installLocation="auto">
+
+    <uses-feature android:glEsVersion="0x00030000" android:required="true" />
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+    <uses-feature android:name="android.hardware.gamepad" android:required="false" />
+    <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
+    <uses-feature android:name="android.hardware.usb.host" android:required="false" />
+
+    <!-- Доступа к файлам нет (игра — в папке приложения, «Импорт» — через системный диалог); «Доступ ко всем
+         файлам» убран — Play Protect предупреждал о приложении с ним. Интернет — для проверки обновлений и
+         загрузки игры. REQUEST_INSTALL_PACKAGES (установка APK из приложения) убран: Google Play защита считает
+         приложение с ним «опасным», а APK теперь скачивается браузером из выпуска на GitHub (Updater.kt). -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <application
+        android:label="@string/app_name"
+        android:icon="@drawable/ic_launcher"
+        android:roundIcon="@drawable/ic_launcher"
+        android:allowBackup="false"
+        android:usesCleartextTraffic="false"
+        android:appCategory="game"
+        android:isGame="true"
+        android:hardwareAccelerated="true"
+        android:theme="@style/Theme.Snx">
+
+        <!-- Game Mode Android 12+: «производительность» / «экономия» из панели игр телефона -->
+        <meta-data android:name="android.game_mode_config" android:resource="@xml/game_mode_config" />
+        <!-- широкие экраны (20:9, 21:9 и уже): без полей по бокам от системы — старые прошивки по умолчанию
+             ограничивали неизменяемые окна пропорцией 1,86 (16:9 с запасом) -->
+        <meta-data android:name="android.max_aspect" android:value="3.0" />
+
+        <activity
+            android:name=".LauncherActivity"
+            android:exported="true"
+            android:screenOrientation="sensorLandscape"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".LayoutEditorActivity"
+            android:exported="false"
+            android:screenOrientation="sensorLandscape"
+            android:theme="@style/Theme.Snx.Fullscreen"
+            android:maxAspectRatio="3.0"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden" />
+
+        <activity
+            android:name=".GameActivity"
+            android:process=":game"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:screenOrientation="sensorLandscape"
+            android:theme="@style/Theme.Snx.Fullscreen"
+            android:preferMinimalPostProcessing="true"
+            android:resizeableActivity="false"
+            android:maxAspectRatio="3.0"
+            android:configChanges="layoutDirection|locale|orientation|uiMode|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation|density" />
+    </application>
+</manifest>

@@ -1,0 +1,345 @@
+# Сборка APK для Android (docs/ANDROID.md, «Сборка в GitHub Actions»). Один блок, одна ссылка на игру.
+# Без игры (push, PR или «Run workflow» с пустой ссылкой) — APK со всем кодом порта, лаунчером и редактором
+# управления, но без кода игры (SNX_NO_GAME): «Играть» сообщает, что игры в сборке нет.
+# С игрой — «Run workflow» со ссылкой на архив своей копии игры (или секрет SNX_GAME_SYSTEM_URL): код игры
+# генерируется рекомпилятором из её System (tools/fetch_game.sh). Английская и русская локализации Spider-Man 2
+# используют один и тот же сгенерированный код: один APK поддерживает оба языка, вариант eng/rus не нужен.
+# Артефакт — сам APK (без zip), подписанный постоянным ключом (android/webhead2-release.p12.b64): новая сборка
+# ставится поверх старой без удаления; versionCode — по времени коммита (растёт с каждым коммитом).
+name: Android APK
+
+on:
+  push:
+    paths:
+      - 'android/**'
+      - 'cmake/**'
+      - 'CMakeLists.txt'
+      - 'platform/**'
+      - 'runtime/**'
+      - 'host/**'
+      - 'recomp/**'
+      - 'tools/android_deps.sh'
+      - 'tools/build.sh'
+      - 'tools/fetch_game.sh'
+      - 'tests/fetch_game_test.sh'
+      - '.github/workflows/android.yml'
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      game_url:
+        description: 'Ссылка на архив игры (zip/7z/rar: папка игры или System; прямая, Яндекс Диск, Google Диск, Dropbox). Пусто — APK без игры'
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  # загрузка архива игры по ссылке (tools/fetch_game.sh) — на синтетических архивах, без игры
+  fetch-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: tools/fetch_game.sh
+        run: sh tests/fetch_game_test.sh
+
+  apk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    outputs:
+      sha: ${{ steps.pack.outputs.sha }}
+      size: ${{ steps.pack.outputs.size }}
+      ver: ${{ steps.pack.outputs.ver }}
+    # contents/actions: read — прогон ничего не публикует (выпуски делает только владелец репозитория вручную),
+    # а артефакт своего же прогона читает, чтобы проверить, что скачивается ровно собранный APK
+    permissions:
+      contents: read
+      actions: read
+    env:
+      NDK_VERSION: 27.2.12479018
+    steps:
+      # ссылку читаем из события, а не через ${{ inputs.* }}: иначе она попадёт в текст шага в логе
+      - name: Режим сборки
+        id: mode
+        env:
+          SECRET_URL: ${{ secrets.SNX_GAME_SYSTEM_URL }}
+        run: |
+          ev() { jq -r ".inputs.$1 // \"\"" "$GITHUB_EVENT_PATH"; }
+          URL=$(ev game_url | tr -d '[:space:]')
+          [ -n "$URL" ] || URL="$SECRET_URL"
+          [ -n "$URL" ] && echo "::add-mask::$URL"
+          GAME=0
+          if [ -n "$URL" ]; then
+            GAME=1
+            printf %s "$URL" > "$RUNNER_TEMP/game_url"
+          fi
+          {
+            echo "game=$GAME"
+            echo "apk=build/webheadNX.apk"
+          } >> "$GITHUB_OUTPUT"
+          echo "### Сборка: $([ $GAME = 1 ] && echo "с игрой" || echo "без игры")" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0  # versionCode = число коммитов
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Android SDK (NDK 27, CMake 3.31.6, API 35)
+        run: |
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKM" --licenses >/dev/null || true
+          "$SDKM" --install "platforms;android-35" "build-tools;35.0.0" "ndk;$NDK_VERSION" "cmake;3.31.6" >/dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+
+      - name: Кэш библиотек (SDL2, OpenAL, ogg/vorbis, FreeType, FFmpeg)
+        id: deps-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: build/android-deps
+          key: android-deps-${{ hashFiles('tools/android_deps.sh') }}-ndk${{ env.NDK_VERSION }}
+
+      - name: Кэш Gradle
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            build/gradle
+          key: gradle-${{ hashFiles('android/**/*.gradle', 'android/gradle/wrapper/gradle-wrapper.properties') }}
+
+      - name: Библиотеки
+        run: tools/android_deps.sh --ffmpeg
+
+      - name: Сохранить кэш библиотек
+        if: steps.deps-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: build/android-deps
+          key: ${{ steps.deps-cache.outputs.cache-primary-key }}
+
+      - name: Игра по ссылке → код рекомпилятора
+        if: steps.mode.outputs.game == '1'
+        run: |
+          python3 -m venv tools/.venv
+          tools/.venv/bin/python -m pip install -q -r tools/requirements.txt
+          gen() {  # gen <файл со ссылкой> <System> <каталог кода>
+            tools/fetch_game.sh "$(cat "$1")" "$2"
+            rm -f "$1"
+            time tools/.venv/bin/python -I recomp/main.py gen --game "$2" --out "$3"
+            du -sh "$3"
+          }
+          # Английская и русская локализации — одна PE-копия и один build/gen
+          gen "$RUNNER_TEMP/game_url" game/System build/gen
+
+      - name: Сборка APK
+        shell: bash
+        run: |
+          set -o pipefail
+          tools/build.sh android --no-daemon 2>&1 | tee "$RUNNER_TEMP/build.log"
+
+      - name: Ошибки сборки — в аннотации
+        if: failure()
+        shell: bash
+        run: |
+          esc() { sed -e 's/%/%25/g' | awk 'BEGIN{ORS="%0A"} {print}'; }
+          L="$RUNNER_TEMP/build.log"
+          [ -f "$L" ] || exit 0
+          grep -nE -A12 "What went wrong|CMake Error|error:|undefined (symbol|reference)" "$L" | grep -v "^\s*at " | head -120 | cut -c1-400 \
+            > "$RUNNER_TEMP/err.txt" || true
+          echo "::error title=build errors::$(esc < "$RUNNER_TEMP/err.txt")"
+          echo "::error title=build tail::$(grep -v "^\s*at " "$L" | tail -n 60 | cut -c1-300 | esc)"
+
+      # Подпись делаем явно и в каноническом порядке: сначала выравнивание, потом apksigner. Gradle тоже
+      # подписывает (android/app/build.gradle), но здесь подпись строится заново поверх готового файла, поэтому
+      # в APK гарантированно нет ни остатков прежних подписей, ни выравнивания после подписи — именно это
+      # устройство и показывает как «Пакет недействителен (например, повреждён)».
+      - name: 'Подпись APK (явно: zipalign → apksigner, v1+v2+v3)'
+        env:
+          APK: ${{ steps.mode.outputs.apk }}
+        run: |
+          BT="$ANDROID_HOME/build-tools/35.0.0"
+          KS="$RUNNER_TEMP/webhead2-release.p12"
+          base64 -d android/webhead2-release.p12.b64 > "$KS"
+          "$BT/zipalign" -f -P 16 4 "$APK" "$RUNNER_TEMP/aligned.apk"
+          "$BT/apksigner" sign --ks "$KS" --ks-type PKCS12 --ks-pass pass:webhead2-android \
+            --key-pass pass:webhead2-android --ks-key-alias webhead2 \
+            --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true \
+            --min-sdk-version 24 --max-sdk-version 35 \
+            --out "$RUNNER_TEMP/signed.apk" "$RUNNER_TEMP/aligned.apk"
+          cp "$RUNNER_TEMP/signed.apk" "$APK"
+          ls -l "$APK"
+          echo "::notice title=Подпись::APK подписан заново apksigner: zipalign -P 16 4, схемы v1+v2+v3, ключ webhead2"
+
+      - name: Проверка APK
+        env:
+          APK: ${{ steps.mode.outputs.apk }}
+          GAME: ${{ steps.mode.outputs.game }}
+        run: |
+          ls -l "$APK"
+          unzip -l "$APK" > "$RUNNER_TEMP/apk.txt"
+          for f in lib/arm64-v8a/libmain.so lib/arm64-v8a/libSDL2.so classes.dex AndroidManifest.xml; do
+            grep -q " $f\$" "$RUNNER_TEMP/apk.txt" || { echo "::error::в APK нет $f"; cat "$RUNNER_TEMP/apk.txt"; exit 1; }
+          done
+          BT="$ANDROID_HOME/build-tools/35.0.0"
+          "$BT/apksigner" verify --verbose --print-certs "$APK" > "$RUNNER_TEMP/cert.txt"
+          head -3 "$RUNNER_TEMP/cert.txt"
+          # apksigner не проверяет v1, если minSdk >= 24: там достаточно v2. Чтобы проверить JAR-подпись,
+          # прогоняем вторую проверку с APIs 21–23 — там v1 обязателен. Отдельно смотрим META-INF в ZIP.
+          "$BT/apksigner" verify --verbose --min-sdk-version 21 --max-sdk-version 23 "$APK" > "$RUNNER_TEMP/cert_v1.txt"
+          grep -Fq "Verified using v1 scheme (JAR signing): true" "$RUNNER_TEMP/cert_v1.txt" \
+            || { echo "::error::нет JAR-подписи v1"; cat "$RUNNER_TEMP/cert_v1.txt"; exit 1; }
+          unzip -Z1 "$APK" > "$RUNNER_TEMP/apk-names.txt"
+          grep -qx 'META-INF/MANIFEST.MF' "$RUNNER_TEMP/apk-names.txt" \
+            || { echo "::error::в APK нет META-INF/MANIFEST.MF"; exit 1; }
+          grep -Eq '^META-INF/[^/]+\.SF$' "$RUNNER_TEMP/apk-names.txt" \
+            || { echo "::error::в APK нет META-INF/*.SF"; exit 1; }
+          grep -Eq '^META-INF/[^/]+\.RSA$' "$RUNNER_TEMP/apk-names.txt" \
+            || { echo "::error::в APK нет META-INF/*.RSA"; exit 1; }
+          for s in "Verified using v2 scheme (APK Signature Scheme v2): true" \
+                   "Verified using v3 scheme (APK Signature Scheme v3): true"; do
+            grep -Fq "$s" "$RUNNER_TEMP/cert.txt" || { echo "::error::$s"; exit 1; }
+          done
+          # постоянный ключ репозитория (android/webhead2-release.p12.b64): иначе обновление не встанет поверх
+          D=$(sed -n 's/.*certificate SHA-256 digest: //p' "$RUNNER_TEMP/cert.txt" | head -1)
+          [ "$D" = 7b17d3b544ae8b3d751b94cb647e79637578f43532ab3d7dc7e4933a824a327a ] \
+            || { echo "::error::APK подписан не ключом android/webhead2-release.p12.b64 ($D)"; exit 1; }
+          # выравнивание в zip (несжатые .so — по 16 КБ): иначе установщик отвечает «Приложение не установлено»
+          "$BT/zipalign" -c -P 16 4 "$APK" || { echo "::error::APK не выровнен (zipalign -c -P 16 4)"; exit 1; }
+          # libmain.so: JNI экранного управления и SDL_main на месте, выравнивание 16 КБ, ролики (FFmpeg)
+          TC="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          unzip -o -q "$APK" lib/arm64-v8a/libmain.so -d "$RUNNER_TEMP/apk"
+          SO="$RUNNER_TEMP/apk/lib/arm64-v8a/libmain.so"
+          "$TC/llvm-nm" -D --defined-only "$SO" > "$RUNNER_TEMP/syms.txt"
+          for s in SDL_main Java_com_webheadnx_game_SnxNative_pad Java_com_webheadnx_game_SnxNative_look \
+                   Java_com_webheadnx_game_SnxNative_lookSens Java_com_webheadnx_game_SnxNative_camMirror \
+                   Java_com_webheadnx_game_SnxNative_key Java_com_webheadnx_game_SnxNative_state \
+                   Java_com_webheadnx_game_SnxNative_menuMode Java_com_webheadnx_game_SnxNative_menuTap \
+                   Java_com_webheadnx_game_SnxNative_mouse; do
+            grep -q " T $s\$" "$RUNNER_TEMP/syms.txt" || { echo "::error::в libmain.so нет $s"; exit 1; }
+          done
+          "$TC/llvm-readelf" -lW "$SO" | grep LOAD | awk '{ if ($NF != "0x4000") bad=1 } END { exit bad }' \
+            || { echo "::error::LOAD-сегменты не выровнены на 16 КБ"; exit 1; }
+          grep -q "SNX_ANDROID_VIDEO:BOOL=ON" build/android-cxx/Release/*/arm64-v8a/CMakeCache.txt \
+            || { echo "::error::libmain.so собран без роликов (SNX_ANDROID_VIDEO=OFF)"; exit 1; }
+          # с игрой в libmain.so должен быть код модулей (mod_core и т. д.), без игры — сообщение SNX_NO_GAME
+          if [ "$GAME" = 1 ]; then
+            ! grep -aq "SNX_NO_GAME" "$SO" || { echo "::error::libmain.so собран без модулей игры"; exit 1; }
+          else
+            grep -aq "SNX_NO_GAME" "$SO" || { echo "::error::ожидалась сборка без игры"; exit 1; }
+          fi
+          {
+            "$BT/aapt2" dump badging "$APK" | grep -E "^package|^minSdkVersion|^targetSdkVersion|^launchable"
+            echo "APK: $(stat -c %s "$APK") байт"
+            unzip -lv "$APK" | awk '/lib\/arm64-v8a\// { print $NF ": " $1 " байт (" $2 ")" }'
+            echo "NEEDED: $("$TC/llvm-readelf" -d "$SO" | sed -n 's/.*Shared library: \[\(.*\)\]/\1/p' | tr '\n' ' ')"
+          } > "$RUNNER_TEMP/summary.txt"
+          echo "::notice title=APK::$(sed -e 's/%/%25/g' "$RUNNER_TEMP/summary.txt" | awk 'BEGIN{ORS="%0A"} {print}')"
+          cat "$RUNNER_TEMP/summary.txt" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Имя файла
+        id: pack
+        env:
+          APK: ${{ steps.mode.outputs.apk }}
+          GAME: ${{ steps.mode.outputs.game }}
+        run: |
+          VER=$("$ANDROID_HOME/build-tools/35.0.0/aapt2" dump badging "$APK" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p")
+          if [ "$GAME" = 1 ]; then NAME="Webhead2-$VER.apk"; DAYS=7; else NAME="webheadNX-nogame-$VER.apk"; DAYS=14; fi
+          mkdir -p build/out
+          cp "$APK" "build/out/$NAME"
+          echo "sha=$(sha256sum "build/out/$NAME" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "size=$(stat -c%s "build/out/$NAME")" >> "$GITHUB_OUTPUT"
+          echo "path=build/out/$NAME" >> "$GITHUB_OUTPUT"
+          echo "ver=$VER" >> "$GITHUB_OUTPUT"
+          echo "days=$DAYS" >> "$GITHUB_OUTPUT"
+          echo "APK: **$NAME**" >> "$GITHUB_STEP_SUMMARY"
+
+      # Артефакт — обычный zip с APK внутри (так его и скачивает браузер на телефоне): файл распаковывается
+      # файловым менеджером, и установщик получает целый .apk. Одиночный файл без архива (archive: false)
+      # скачивался обрезанным — Android показывал «Пакет повреждён».
+      - name: Артефакт
+        uses: actions/upload-artifact@v7
+        with:
+          name: webheadNX-nogame-${{ steps.pack.outputs.ver }}
+          path: ${{ steps.pack.outputs.path }}
+          retention-days: ${{ steps.pack.outputs.days }}
+          if-no-files-found: error
+
+      # Выпусков в CI нет и не будет: APK публикует только владелец репозитория, вручную и сам.
+      # Прогон отдаёт единственное — артефакт (сам APK, archive: false). Токен у прогона только на чтение.
+
+      # Итог по файлу в аннотацию: имя, размер, sha256, отпечаток ключа. Сама проверка скачивания — в отдельном
+      # задании download-check: артефакт — обычный zip, поэтому digest хранилища относится к архиву, а не к APK.
+      - name: Итог по APK
+        env:
+          APK: ${{ steps.pack.outputs.path }}
+        run: |
+          NAME=$(basename "$APK")
+          SIZE=$(stat -c%s "$APK")
+          SHA=$(sha256sum "$APK" | cut -d' ' -f1)
+          CERT=$(sed -n 's/.*certificate SHA-256 digest: //p' "$RUNNER_TEMP/cert.txt" | head -1)
+          echo "::notice title=APK::$NAME — $SIZE байт, sha256 $SHA, ключ $CERT, схемы v1+v2+v3"
+          {
+            echo "### APK"
+            echo ""
+            echo "\`$NAME\` — $SIZE байт, sha256 \`$SHA\`, ключ \`$CERT\`, схемы v1+v2+v3"
+            echo ""
+            echo "Артефакт — zip с этим APK (архив скачивается целиком, APK распаковывается файловым менеджером)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Проверка того, что реально скачивается с GitHub: артефакт забирается обратно, распаковывается и сверяется с
+  # собранным APK по sha256, а распакованный APK проверяется apksigner. Это тот же путь, которым файл берёт
+  # телефон, поэтому обрезанная загрузка или неверный файл валят прогон здесь, а не установку на устройстве.
+  download-check:
+    needs: apk
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      actions: read
+    steps:
+      - name: Артефакт прогона
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECT_SHA: ${{ needs.apk.outputs.sha }}
+          EXPECT_SIZE: ${{ needs.apk.outputs.size }}
+          EXPECT_VER: ${{ needs.apk.outputs.ver }}
+        run: |
+          mkdir -p dl
+          ok=0
+          for i in $(seq 1 12); do
+            rm -rf dl/*  # обрыв загрузки оставляет недокачанный файл — начинаем заново
+            if gh run download "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY" -D dl; then ok=1; break; fi
+            sleep 15
+          done
+          [ "$ok" = 1 ] || { echo "::error::артефакт прогона не скачивается целиком (обрыв загрузки)"; exit 1; }
+          find dl -type f -print -exec stat -c%s {} \;
+          APK=$(find dl -name '*.apk' | head -1)
+          [ -n "$APK" ] || { echo "::error::в артефактах прогона нет APK"; exit 1; }
+          GOT=$(sha256sum "$APK" | cut -d' ' -f1)
+          GOTSZ=$(stat -c%s "$APK")
+          echo "скачано: $APK — $GOTSZ байт, sha256 $GOT"
+          if [ "$GOT" != "$EXPECT_SHA" ] || [ "$GOTSZ" != "$EXPECT_SIZE" ]; then
+            echo "::error::скачанный APK не совпадает с собранным: $GOTSZ байт / $GOT, ожидалось $EXPECT_SIZE / $EXPECT_SHA"
+            exit 1
+          fi
+          echo "::notice title=Скачивание::APK из артефакта совпадает с собранным — $GOTSZ байт, sha256 $GOT, версия $EXPECT_VER"
+      - name: Подпись распакованного APK
+        run: |
+          BT="$ANDROID_HOME/build-tools/35.0.0"
+          APK=$(find dl -name '*.apk' | head -1)
+          "$BT/apksigner" verify --verbose --print-certs "$APK" | tee "$RUNNER_TEMP/v.txt"
+          D=$(sed -n 's/.*certificate SHA-256 digest: //p' "$RUNNER_TEMP/v.txt" | head -1)
+          [ "$D" = 7b17d3b544ae8b3d751b94cb647e79637578f43532ab3d7dc7e4933a824a327a ] \
+            || { echo "::error::скачанный APK подписан не тем ключом ($D)"; exit 1; }
+          echo "::notice title=Скачивание::подпись скачанного APK в порядке, ключ $D"
