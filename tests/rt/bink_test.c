@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include "runtime/abi.h"
 #include "runtime/heap.h"
@@ -19,6 +20,7 @@ void hle_binkw32__BinkClose_4(CPU *c);
 void hle_binkw32__BinkOpenTrack_8(CPU *c);
 void hle_binkw32__BinkCloseTrack_4(CPU *c);
 void hle_binkw32__BinkGetTrackData_8(CPU *c);
+void hle_binkw32__BinkWait_4(CPU *c);
 void hle_binkw32__BinkDoFrame_4(CPU *c);
 void hle_binkw32__BinkNextFrame_4(CPU *c);
 void hle_binkw32__BinkCopyToBuffer_28(CPU *c);
@@ -284,6 +286,13 @@ static void test_bink_container_hle(const char *tmp_dir)
     snprintf(fpath, sizeof fpath, "%s/valid.bik", movies);
     write_file_bytes(fpath, valid_bik, valid_sz);
 
+    // Ролик с настоящими размерами кадра и очень быстрыми кадрами (fps=1000, кадр 1 мс): на нём проверяется
+    // расписание BinkWait — если игра не успевает, кадры пропускаются, а не растягивают ролик.
+    u8 pacing_bik[1024];
+    u32 pacing_sz = build_valid_bik(pacing_bik, 8, 8, 1000, 1, 0x5000);
+    snprintf(fpath, sizeof fpath, "%s/pacing.bik", movies);
+    write_file_bytes(fpath, pacing_bik, pacing_sz);
+
     // Повреждённые файлы в Movies/
     u8 short_bik[20];
     memset(short_bik, 0, sizeof short_bik);
@@ -410,6 +419,23 @@ static void test_bink_container_hle(const char *tmp_dir)
             CHECK(hle_call(hle_binkw32__BinkGetTrackData_8, 2, a_td) == 1920, "GetTrackData из файла");
         }
         u32 a_b[1] = {bf};
+        hle_call(hle_binkw32__BinkClose_4, 1, a_b);
+    }
+
+    // 3b. Расписание кадров (BinkWait): ролик идёт по часам, отставшие кадры пропускаются. Раньше «ждать»
+    // отсчитывалось от предыдущего BinkCopyToBuffer, поэтому на телефоне ролик играл медленнее реального времени.
+    strcpy((char *)g_mem + G_NAME, "C:\\Shrek2\\Movies\\pacing.bik");
+    u32 bp = hle_call(hle_binkw32__BinkOpen_8, 2, a_file);
+    CHECK(bp != 0, "BinkOpen pacing.bik вернул 0");
+    if (bp) {
+        u32 a_b[1] = {bp};
+        // Первый вызов заводит расписание и просит подождать: кадр 0 ещё показывается.
+        CHECK(hle_call(hle_binkw32__BinkWait_4, 1, a_b) == 1, "BinkWait на старте ролика должен вернуть 1");
+        CHECK(rd32(g_mem, bp + 12) == 1, "BinkWait без BinkNextFrame не должен двигать кадр до времени");
+        usleep(30000);  // 30 кадров ролика (по 1 мс) — телефон «не успел»
+        CHECK(hle_call(hle_binkw32__BinkWait_4, 1, a_b) == 0, "BinkWait после паузы должен вернуть 0");
+        CHECK(rd32(g_mem, bp + 12) == 2, "отставшие кадры ролика должны пропускаться (FrameNum=%u)",
+              rd32(g_mem, bp + 12));
         hle_call(hle_binkw32__BinkClose_4, 1, a_b);
     }
 

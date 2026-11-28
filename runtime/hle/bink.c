@@ -49,6 +49,10 @@ typedef struct {
     int menu_movie;        // заставка главного меню/логотипов, а не игровая сцена
     u32 do_frame;          // кадр последнего BinkDoFrame (~0u — не было)
     u64 tick_ns;           // последний вызов игры по этому ролику (кадр, звук, копия)
+    u64 next_ns;           // когда по расписанию показывать следующий кадр (0 — ролик ещё не пошёл)
+    u32 skipped;           // кадров пропущено, чтобы ролик не отставал от реального времени
+    u32 shown;             // кадров показано игре (BinkCopyToBuffer)
+    u64 start_ns;          // когда ролик пошёл (для отчёта «сколько против ожидаемого»)
     u64 stats_ns, copy_ns; // статистика (movie_stats): начало отрезка, время перевода кадров
     u32 copy_n;
 } bink;
@@ -354,6 +358,29 @@ static u32 scan_track_maxsize(bink *b, u32 t)
     return mx;
 }
 
+// Длительность кадра ролика по заголовку (fps/fpsdiv): у Bink 1 это 15/1, 30/1, 30000/1001 и т. п.
+static u64 movie_period_ns(const bink *b)
+{
+    if (!b->fps || !b->fpsdiv)
+        return 0;
+    return (u64)b->fpsdiv * 1000000000ull / b->fps;
+}
+
+// Сколько кадров можно пропустить за один BinkWait: ролик не должен «прыгать» через полфильма, если игра
+// один раз задумалась (загрузка, окно свернули).
+#define MOV_MAX_SKIP 6u
+// Отстали больше чем на секунду — это не медленный телефон, а пауза/загрузка: расписание начинаем заново,
+// кадры не пропускаем (иначе ролик проскочит кусок).
+#define MOV_RESYNC_NS 1000000000ull
+
+static void movie_clock_restart(bink *b)
+{
+    b->next_ns = 0;
+    b->start_ns = 0;
+    b->skipped = 0;
+    b->shown = 0;
+}
+
 // Раз в 2 с, пока ролик идёт: скорость декодирования и перевода кадра в snx.log
 static void movie_stats(bink *b)
 {
@@ -369,8 +396,12 @@ static void movie_stats(bink *b)
     double dec, wait;
     u32 n;
     bink_video_stats(b->vid, &dec, &wait, &n);
-    fprintf(stderr, "[bink] movie %ux%u: %u frames in %.1f s, decode %.1f ms/frame (waited %.1f), copy %.1f ms\n",
-            b->w, b->h, n, (double)(now - b->stats_ns) / 1e9, dec, wait,
+    double secs = (double)(now - b->stats_ns) / 1e9;
+    double fps = secs > 0.0 ? (double)n / secs : 0.0;
+    double mfps = b->fps ? (double)b->fps / (double)b->fpsdiv : 0.0;
+    fprintf(stderr, "[bink] movie %ux%u: %u frames in %.1f s (%.1f fps, movie %.2f fps, skipped %u), "
+                    "decode %.1f ms/frame (waited %.1f), copy %.1f ms\n",
+            b->w, b->h, n, secs, fps, mfps, b->skipped, dec, wait,
             b->copy_n ? (double)b->copy_ns / 1e6 / (double)b->copy_n : 0.0);
     b->stats_ns = now;
     b->copy_ns = 0;
@@ -499,6 +530,7 @@ void hle_binkw32__BinkOpen_8(CPU *c)
     b->movie = from_file && b->w && b->h;
     b->menu_movie = b->movie && menu_movie;
     b->tick_ns = rt_ticks_ns();
+    movie_clock_restart(b);
     if (b->movie) {
         fprintf(stderr, "[bink] movie %ux%u, %u frames, audio tracks: %u\n", b->w, b->h, b->frames, b->ntracks);
         for (u32 t = 0; t < b->ntracks; t++)
@@ -527,6 +559,17 @@ void hle_binkw32__BinkClose_4(CPU *c)
                 for (u32 t = 0; t < b->ntracks; t++)
                     req += b->audio_req[t];
                 fprintf(stderr, "[bink] movie closed: %u audio frame(s) taken by the game\n", req);
+                // Итог по темпу: сколько секунд ролика показано против реального времени. Если «wall» заметно
+                // больше «of movie» — устройство не успевает (видно, сколько кадров пришлось пропустить).
+                u64 per = movie_period_ns(b);
+                if (b->start_ns && per) {
+                    double wall = (double)(rt_ticks_ns() - b->start_ns) / 1e9;
+                    double expect = (double)(b->shown + b->skipped) * (double)per / 1e9;
+                    fprintf(stderr,
+                            "[bink] movie played: %u frames shown, %u skipped, %.1f s wall vs %.1f s of movie "
+                            "(%.0f%% of real time)\n",
+                            b->shown, b->skipped, wall, expect, wall > 0.0 ? expect * 100.0 / wall : 0.0);
+                }
             }
             g_bink[i] = NULL;
             bink_destroy(b);
@@ -845,9 +888,38 @@ void hle_binkw32__BinkWait_4(CPU *c)
     HLE_ENTER("BinkWait", 1);
     bink *b = by_obj(ARG(0));
     int wait = 0;
-    if (b && b->fps) {
-        u64 period = (u64)b->fpsdiv * 1000000000ull / b->fps;  // длительность кадра, нс
-        if (period && rt_ticks_ns() - b->tick_ns < period)
+    u64 period = b ? movie_period_ns(b) : 0;
+    if (b && b->movie && period) {
+        // Расписание считается от старта ролика, а не от последнего кадра: ролик идёт по часам, и если телефон
+        // рисует реже, чем кадры ролика (20–25 к/с против 30), лишние кадры пропускаются, а не растягивают
+        // ролик. Раньше «ждать» отсчитывалось от предыдущего BinkCopyToBuffer, поэтому на слабом устройстве
+        // ролик играл медленнее реального времени и отставал от собственного звука.
+        u64 now = rt_ticks_ns();
+        if (!b->next_ns) {  // первый кадр: показываем сразу и заводим расписание
+            b->next_ns = now;
+            b->start_ns = now;
+        } else if (now > b->next_ns + MOV_RESYNC_NS) {  // пауза/загрузка — расписание заново
+            b->next_ns = now;
+            b->start_ns = now;
+        }
+        u32 late = 0;  // сколько периодов уже прошло сверх одного
+        while (now >= b->next_ns + period * (u64)(late + 1) && late < MOV_MAX_SKIP)
+            late++;
+        b->next_ns += period * (u64)(late + 1);
+        if (late) {  // кадры, которые всё равно не показать: пропускаем, чтобы картинка не отставала от звука
+            u32 target = b->frame + late;
+            if (target >= b->frames)
+                target = b->frames - 1;
+            b->skipped += target - b->frame;
+            b->frame = target;
+            sync_obj(b);
+            movie_audio_pump(b);  // очередь звука пополняется и пропущенными кадрами — провалов нет
+        } else {
+            wait = 1;
+        }
+    } else if (b && b->fps) {  // не ролик (звук в пакете) — как раньше: ждём от последнего обращения
+        u64 p = movie_period_ns(b);
+        if (p && rt_ticks_ns() - b->tick_ns < p)
             wait = 1;
     }
     RET(1, wait);
@@ -868,6 +940,8 @@ void hle_binkw32__BinkCopyToBuffer_28(CPU *c)
             fprintf(stderr, "[bink] BinkCopyToBuffer at %d,%d: outside the frame, skipped\n", (s32)x0, (s32)y0);
     } else if (b && dst >= 0x10000u && dst < RT_WINDOW && pitch > 0 && b->w > 0 && b->h > 0) {
         b->tick_ns = rt_ticks_ns();
+        if (b->movie)
+            b->shown++;
         u32 rows = dst_h < b->h ? dst_h : b->h;
         if (rows > 0) {
             u32 type = flags & 15u;
@@ -898,6 +972,7 @@ void hle_binkw32__BinkGoto_12(CPU *c)
     bink *b = by_obj(ARG(0));
     if (b && ARG(1) >= 1 && ARG(1) <= b->frames) {
         b->frame = ARG(1) - 1;
+        movie_clock_restart(b);  // перемотка: расписание и счётчики заново
         sync_obj(b);
     }
     RET(3, 0);

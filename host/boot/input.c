@@ -231,10 +231,13 @@ static const char g_snx_default[] =
     "Plus=Escape        ; меню - клавишей: открытое с джойстика меню игра рисует без книги\n"
     "B=Ctrl             ; прыжок - клавишей Ctrl, как на ПК: двойной прыжок и лианы (кнопка джойстика Joy2\n"
     ";                    срабатывала через раз). B= (пусто) - снова Joy2 из User.ini\n"
-    "CameraMode=Joystick ; камера правым стиком: Joystick - ось JoyU/JoyV (плавно, в меню и паузе - мышь),\n"
-    ";                    Mouse - смещениями мыши и в игре (как палец)\n"
-    "MoveSpeed=1200     ; бег при полном наклоне левого стика (как клавиша W)\n"
-    "CameraSpeed=72     ; поворот камеры правым стиком (умножается ещё на скорость мыши из меню игры)\n"
+    "; Камера правым стиком и палец работают одинаково - отсчётами мыши: ось JoyU/JoyV до камеры в этой игре\n"
+    "; не доходит, поэтому стик сам добавляет отсчёты. Левый стик жмёт W/S/A/D (пара JoyX/JoyY здесь крутит\n"
+    "; камеру, а не ведёт героя).\n"
+    "; CameraMode оставлен для совместимости файла и ни на что не влияет.\n"
+    "CameraMode=Mouse\n"
+    "MoveSpeed=1200     ; запас на будущее: ось хода игре не шлётся, ход - клавишами W/S/A/D\n"
+    "CameraSpeed=72     ; скорость поворота правым стиком (72 - как раньше: ~1200 отсчётов/с при полном наклоне)\n"
     "InvertCameraY=False\n"
     "DeadZone=0.15      ; мёртвая зона стиков (доля хода)\n"
     "Rumble=True        ; вибрация геймпада\n"
@@ -262,19 +265,24 @@ static int g_diag_pawn;
 // (g_menu_latch) только переводят касания в мышь (g_touch_menu_pass) — стик, кнопки и камера при этом живут.
 static int g_input_frozen;
 static float g_move_speed = 1200.0f, g_cam_speed = 72.0f, g_dead = 0.15f;
+// Камера с правого стика — теми же отсчётами мыши, что и палец (игру ось JoyU/JoyV не крутит). Полный наклон
+// даёт PAD_CAM_COUNTS_PER_SEC отсчётов в секунду при CameraSpeed 72 и чувствительности 1.0 — это ровно те
+// ~1200 отсчётов/с, что давала прежняя подача осью, то есть ощущение поворота не меняется, но работает всегда.
+#define PAD_CAM_COUNTS_PER_SEC 1200.0f
+#define PAD_CAM_SPEED_REF 72.0f
+#define PAD_KEY_ENTER 0.35f  // стик пошёл дальше — жать клавишу хода
+#define PAD_KEY_EXIT 0.15f   // вернулся ближе — отпускать (гистерезис: у порога не дребезжит)
+static int g_pad_walk_fwd, g_pad_walk_side;  // какое направление хода сейчас держат клавиши
 // Мёртвая зона камеры отдельная: у правого стика (и пальца-камеры) она больше — иначе возврат пальца через центр
 // на полпути даёт обратный поворот, и камера «доезжает» влево после поворота вправо. Живёт на ходу (шестерёнка).
 static float g_dead_cam = 0.20f;
 static int g_invert_y;
 static int g_invert_x;  // зеркалить поворот камеры по горизонтали (если у геймпада/оси он обратный)
-// Камера правым стиком. 0 (по умолчанию) — осью джойстика JoyU/JoyV (aMouseX/aMouseY): камера плавная, как на
-// консоли, и в игре мышь не нужна — смещения мыши остаются только меню и паузе, где ими водят курсор (ниже,
-// ветка g_input_frozen). 1 — смещениями мыши DirectInput и в игре (как камера пальцем): так было раньше, но
-// мышь — это скорость, а не положение, и в игре она «дёргается»: 20·Δ/Δt из целых пикселей. Ось можно отключить
-// («Как палец» в лаунчере, Snx.ini CameraMode=Mouse), если камера осью пропадает (Retroid Pocket, GameSir).
-// Скорость: ось V даёт aMouseX = 20·V, мышь — 1,2 на отсчёт в секунду (MouseX: Axis aMouseX Speed=6, ×0,01;
-// UInput::ReadInput ×20/Δt), то есть CameraSpeed 72 ≈ 1200 отсчётов/с при полном наклоне; ещё × «Чувствительность
-// камеры» лаунчера (SNX_LOOK_SENS).
+// Камера правым стиком — отсчётами мыши, как и палец: в этой игре камеру крутят MouseX/MouseY (User.ini), а ось
+// джойстика (JoyU/JoyV) до камеры не доходит — на устройстве правый стик её не двигал вовсе. Поэтому стик раз в
+// кадр добавляет к тем же накопленным отсчётам свою долю (значение оси × PAD_CAM_COUNTS_PER_SEC × dt ×
+// чувствительность), и дальше всё идёт одним путём с пальцем (cam_tick → dinput8_mouse_move). В меню и паузе
+// (ветка g_input_frozen) стики водят курсор, как раньше.
 // ── Камера пальцем: как мышь на ПК (и как в Winlator) ──────────────────────────────────────────────────────
 // Палец двигает «мышь»: смещение пальца по экрану переводится в отсчёты мыши, которые игра читает из User.ini
 // (MouseX=Count bXAxis | Axis aMouseX Speed=2.0). Никаких градусов, калибровок, потолков и обратной связи —
@@ -291,7 +299,8 @@ static float g_cam_mx, g_cam_my;           // дробные остатки от
 static int g_cam_sent_x, g_cam_sent_y;     // что ушло в игру в этом кадре (для [cam])
 static u32 g_cam_last_touch;               // когда палец последний раз двигал камеру
 
-// Камера — всегда ось правого стика (без мыши). [Pad] CameraMode остаётся в файле настроек для совместимости.
+// Камера одна на всё: отсчёты мыши (палец и правый стик геймпада). [Pad] CameraMode остаётся в файле настроек
+// только для совместимости и ни на что не влияет.
 // Чувствительность камеры правится на ходу («Настройки» в игре — ползунок без перезапуска): читает поток ввода,
 // пишет UI-поток, поэтому атомарно.
 static _Atomic float g_look_sens = 1.0f;
@@ -1308,6 +1317,35 @@ static void stick(float x, float y, int curve, float dead, float *ox, float *oy)
     *oy = y / m * k;
 }
 
+// Геймпад, левый стик: в этой игре пара осей JoyX/JoyY поворачивает камеру, а не ведёт героя (то же выяснилось
+// и с экранным стиком), поэтому ход — клавишами W/S/A/D с гистерезисом, ровно как у экранного стика. Клавиши
+// держит порт: отпускает их сам, когда стик вернулся в центр, — «залипшего» бега не бывает.
+static void pad_walk(float sx, float sy)
+{
+    int fwd = g_pad_walk_fwd;
+    fwd = fwd == 0 ? (sy < -PAD_KEY_ENTER ? -1 : sy > PAD_KEY_ENTER ? 1 : 0)
+                   : (fwd < 0 ? (sy < -PAD_KEY_EXIT ? -1 : sy > PAD_KEY_ENTER ? 1 : 0)
+                              : (sy > PAD_KEY_EXIT ? 1 : sy < -PAD_KEY_ENTER ? -1 : 0));
+    int side = g_pad_walk_side;
+    side = side == 0 ? (sx < -PAD_KEY_ENTER ? -1 : sx > PAD_KEY_ENTER ? 1 : 0)
+                     : (side < 0 ? (sx < -PAD_KEY_EXIT ? -1 : sx > PAD_KEY_ENTER ? 1 : 0)
+                                 : (sx > PAD_KEY_EXIT ? 1 : sx < -PAD_KEY_ENTER ? -1 : 0));
+    if (fwd != g_pad_walk_fwd) {
+        if (g_pad_walk_fwd)
+            key(g_pad_walk_fwd < 0 ? 0x57 : 0x53, 0);  // W / S
+        g_pad_walk_fwd = fwd;
+        if (fwd)
+            key(fwd < 0 ? 0x57 : 0x53, 1);
+    }
+    if (side != g_pad_walk_side) {
+        if (g_pad_walk_side)
+            key(g_pad_walk_side < 0 ? 0x41 : 0x44, 0);  // A / D
+        g_pad_walk_side = side;
+        if (side)
+            key(side < 0 ? 0x41 : 0x44, 1);
+    }
+}
+
 // SNX_KEYS=<секунда>:<VK hex>,... — нажать и отпустить клавишу в заданное время от старта (проверки без рук:
 // например, F12 с привязкой «setres 1024x768» в User.ini); <секунда>:@<u>/<v> — касание экрана в точке окна
 // (доли ширины и высоты; в меню); <секунда>:%<кнопка>+ / %<кнопка>- — нажать / отпустить кнопку геймпада
@@ -1832,26 +1870,31 @@ void input_tick(void)
         // джойстик: lX lY — левый стик, lRy lRz (JoyU, JoyV) — правый; крестовина — POV
         static const int pov_of[16] = {-1, 0, 18000, -1, 27000, 31500, 22500, 27000,
                                        9000, 4500, 13500, 9000, -1, 0, 18000, -1};
-        // Камера: палец копит отсчёты мыши, cam_tick отдаёт их игре (как мышь на ПК). Правый стик геймпада идёт
-        // своим путём — осью (fay/fap всегда 0, оставлены ради совместимости с осью стика).
+        // Камера: правый стик добавляет свои отсчёты к тем же накопленным, что и палец (одна модель — мышь), и
+        // cam_tick отдаёт всё игре за этот кадр. Осью JoyU/JoyV камера в этой игре не крутится, поэтому осей
+        // правого стика игре не шлём вовсе.
+        float sens = atomic_load_explicit(&g_look_sens, memory_order_relaxed);
+        float rate = PAD_CAM_COUNTS_PER_SEC * (g_cam_speed / PAD_CAM_SPEED_REF) * sens * dt;
+        float prx = g_invert_x ? -rx : rx, pry = g_invert_y ? -ry : ry;
+        if (prx != 0.0f || pry != 0.0f) {
+            g_cam_pend_x += prx * rate;
+            g_cam_pend_y += pry * rate;
+            g_cam_last_touch = SDL_GetTicks();
+        }
         float fay = 0.0f, fap = 0.0f;
         cam_tick(dt, &fay, &fap);
-        float rxs = (g_invert_x ? -rx : rx), rys = (g_invert_y ? -ry : ry);
-        if (fabsf(fay) > fabsf(rxs))  // чей запрос сильнее, тот и ведёт камеру
-            rxs = fay;
-        if (fabsf(fap) > fabsf(rys))
-            rys = fap;
-        float cs = g_cam_speed * atomic_load_explicit(&g_look_sens, memory_order_relaxed);
-        // Экранный стик хода НЕ отправляет оси (ax[0]/ax[1] = 0): персонаж и так идёт клавишами W/S/A/D, которые
-        // экранный стик жмёт сам, а эту пару осей игра читает как камеру — из-за этого при ходе экранным стиком
-        // крутилась и камера. Физический геймпад оси по-прежнему шлёт: его стик в C приходит не из g_touch_ax.
+        // Ход: и экранный стик, и левый стик геймпада жмут W/S/A/D — пара осей JoyX/JoyY в этой игре крутит
+        // камеру, а не ведёт героя, поэтому оси хода игре не шлём совсем (ни с экрана, ни с геймпада).
         int touch_stick = fabsf(g_touch_ax[0]) > 0.01f || fabsf(g_touch_ax[1]) > 0.01f;
-        float ax[6] = {touch_stick ? 0.0f : lx * g_move_speed, touch_stick ? 0.0f : ly * g_move_speed, 0, 0,
-                       rxs * cs, rys * cs};
+        float plx, ply;
+        stick(pad_axis(SDL_CONTROLLER_AXIS_LEFTX), pad_axis(SDL_CONTROLLER_AXIS_LEFTY), 0, g_dead, &plx, &ply);
+        pad_walk(touch_stick ? 0.0f : plx, touch_stick ? 0.0f : ply);
+        static const float ax[6];  // оси игре не нужны: ход — клавишами, камера — отсчётами мыши
         dinput8_joy(ax, (g_joy_buttons | g_joy_latch) & 0xFFF, pov_of[g_joy_buttons >> 16 & 15]);
         g_joy_latch = 0;
         return;
     }
+    pad_walk(0.0f, 0.0f);  // меню: клавиши хода отпущены, ввод игры заморожен
     static const float zero[6];
     dinput8_joy(zero, g_joy_frozen & 0xFFF, -1);
     float gx, gy;
