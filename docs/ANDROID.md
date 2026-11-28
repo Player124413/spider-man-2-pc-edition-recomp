@@ -106,6 +106,12 @@ adb install -r build/webheadNX.apk
   удержание угла и переключение выходов выключаются, поворот идёт строго один к одному. В `[cam]` это видно
   как `read=dead` (и строка `camera angles read back as constant …` в логе). Переключение «мышь ↔ ось стика» стало одним счётчиком: отдано градусов
   против того, сколько камера реально прошла (`CAM_STALL_FRAMES` = 25 кадров); в `[cam]` теперь есть `peak=`.
+* **Запасного пути «осью стика» нет.** В `System/User.ini`/`DefUser.ini` обзор привязан только к `MouseX`/
+  `MouseY` (`Axis aMouseX Speed=2.0`); `JoyU`/`JoyV` не встречаются ни в одной секции, поэтому камеру в этой игре
+  двигают исключительно отсчёты мыши — как мышью на ПК. Автопереключение выхода убрано (на устройстве, где
+  отсчёты не читаются, оно лишь выключало камеру); ось включается только через `SNX_CAM_AXIS=1`. Если 25 кадров
+  отдавали поворот, а камера не двигалась, в лог идёт `[cam] sent … the camera did not move — mouse counts may be
+  ignored` — по этой строке сразу видно, читает ли игра наши отсчёты.
 * **Сглаживание обзора выключено в самой игре.** Камеру крутит движок: `MouseX=Count bXAxis | Axis aMouseX
   Speed=2.0` (`System/User.ini`) → `PlayerInput.aMouseX` → `PlayerController`. У `PlayerInput` есть
   `MouseSmoothingMode`/`MouseSmoothingStrength` — это галочка «Mouse Smoothing» в настройках игры (в `Webhead.u`:

@@ -290,7 +290,7 @@ static int g_invert_x;  // зеркалить поворот камеры по �
 // превращаются в рывки «то 0°, то 12°». Хвост меньше 0.25° отдаём целиком, чтобы жест всегда доходил до конца.
 #define CAM_FEED 0.55f
 #define CAM_COUNTS_SAFE 1200       // страховка: отсчётов мыши за кадр (даже при кривой калибровке не больше)
-#define CAM_STALL_FRAMES 25         // кадров «просим, а камера не поворачивается» — меняем выход
+#define CAM_STALL_FRAMES 25         // кадров «просим, а камера не поворачивается» — пишем в лог
 #define CAM_FORGET_MS 800           // палец не трогали — накопленный остаток забываем
 #define CAM_HOLD_EPS 0.5f           // градусы: меньше — камера «на месте», не трогаем
 #define CAM_HOLD_GAIN 0.25f         // доля ошибки за кадр: возвращаем угол мягко, а не рывком
@@ -308,8 +308,12 @@ static float g_cam_rate_axis = 150.0f;     // градусов в секунду
 static int g_cam_read_moves;     // сколько раз углы камеры реально менялись
 static int g_cam_read_dead;      // 1 — углы читаются постоянными, обратную связь не используем
 static float g_cam_deliv_acc;    // сколько градусов уже отдали (пока не увидели ни одного сдвига)
-static int g_cam_out_mouse = 1;            // 1 — отсчёты мыши (как на ПК), 0 — ось правого стика
-static int g_cam_out_switches;
+// Камеру крутят отсчёты мыши — единственный путь, который в этой игре вообще есть: в System/User.ini обзор
+// привязан к MouseX/MouseY (`Axis aMouseX Speed=2.0`), а осей джойстика (JoyU/JoyV) в привязках камеры нет ни в
+// User.ini, ни в DefUser.ini. Поэтому выход один: раньше порт «на всякий случай» переключался на ось правого
+// стика, и на устройстве, где отсчёты не читаются, это просто выключало камеру совсем. Теперь переключения нет,
+// ось доступна только явно (SNX_CAM_AXIS=1, отладка), а «камера не отвечает на отсчёты» просто пишется в лог.
+static int g_cam_out_mouse = 1;            // 1 — отсчёты мыши (как на ПК), 0 — ось правого стика (только SNX_CAM_AXIS=1)
 static int g_cam_stall_frames;                 // кадров в окне наблюдения
 static float g_cam_sent_acc, g_cam_turned_acc;  // отдано градусов / камера реально повернулась
 static float g_cam_mx, g_cam_my;           // дробные остатки отсчётов мыши
@@ -679,6 +683,10 @@ void input_init(const char *user_dir)
         input_set_look_sens((float)atof(ls));
     input_set_cam_mirror(getenv("SNX_CAM_INV_X") && *getenv("SNX_CAM_INV_X") == '1',
                          getenv("SNX_CAM_INV_Y") && *getenv("SNX_CAM_INV_Y") == '1');
+    // Ось правого стика к камере в этой игре не привязана (в User.ini есть только MouseX/MouseY) — включаем её
+    // только явно, для отладки на другом устройстве.
+    if (getenv("SNX_CAM_AXIS") && *getenv("SNX_CAM_AXIS") == '1')
+        g_cam_out_mouse = 0;
     input_set_cam_hold(!getenv("SNX_CAM_HOLD") || *getenv("SNX_CAM_HOLD") != '0');
     fprintf(stderr, "[input] camera: hold angle=%d, sensitivity %.2f, mirror x=%d y=%d\n", g_cam_hold,
             (double)atomic_load_explicit(&g_look_sens, memory_order_relaxed), g_invert_x, g_invert_y);
@@ -1824,25 +1832,18 @@ static void cam_tick(float dt, float *axy, float *axp)
         g_cam_pend_p -= given_p;
     }
     // «Просим, а камера не поворачивается»: сравниваем отданные градусы с тем, что камера реально прошла за окно
-    // CAM_STALL_FRAMES. Раньше смотрели на остаток просьбы, но теперь он списывается сразу при выдаче, поэтому
-    // нужен отдельный счётчик — иначе выход вовсе не переключился бы на устройстве, где мышь не читается.
+    // CAM_STALL_FRAMES. Выход при этом НЕ меняем (см. комментарий у g_cam_out_mouse: ось джойстика в этой игре к
+    // камере не привязана, переключение только выключило бы её совсем) — но пишем в лог, чтобы по нему было видно,
+    // читает ли игра наши отсчёты.
     if (oky && !g_cam_read_dead) {
         g_cam_sent_acc += fabsf(given_y);
         g_cam_turned_acc += fabsf(dy);
         if (++g_cam_stall_frames >= CAM_STALL_FRAMES) {
             if (g_cam_sent_acc > 6.0f && g_cam_turned_acc < 0.5f) {
-                if (g_cam_out_switches < 4) {
-                    g_cam_out_mouse = !g_cam_out_mouse;
-                    g_cam_out_switches++;
-                    g_cam_pend_y = g_cam_pend_p = 0.0f;
-                    fprintf(stderr, g_cam_out_mouse
-                                        ? "[cam] stick axis doesn't turn the camera here — back to mouse counts\n"
-                                        : "[cam] mouse counts don't turn the camera here — using the right stick axis\n");
-                } else {
-                    static int warned;
-                    if (!warned++)  // ни мышь, ни ось не двигают камеру — говорим прямо
-                        fprintf(stderr, "[cam] neither mouse counts nor stick axis turn the camera here\n");
-                }
+                static int warned;
+                if (warned++ < 3)  // не чаще трёх строк за сеанс
+                    fprintf(stderr, "[cam] sent %.0f deg but the camera did not move — mouse counts may be ignored\n",
+                            (double)g_cam_sent_acc);
             }
             g_cam_sent_acc = g_cam_turned_acc = 0.0f;
             g_cam_stall_frames = 0;
