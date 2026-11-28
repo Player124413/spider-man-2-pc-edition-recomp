@@ -106,6 +106,15 @@ adb install -r build/webheadNX.apk
   удержание угла и переключение выходов выключаются, поворот идёт строго один к одному. В `[cam]` это видно
   как `read=dead` (и строка `camera angles read back as constant …` в логе). Переключение «мышь ↔ ось стика» стало одним счётчиком: отдано градусов
   против того, сколько камера реально прошла (`CAM_STALL_FRAMES` = 25 кадров); в `[cam]` теперь есть `peak=`.
+* **Сглаживание обзора выключено в самой игре.** Камеру крутит движок: `MouseX=Count bXAxis | Axis aMouseX
+  Speed=2.0` (`System/User.ini`) → `PlayerInput.aMouseX` → `PlayerController`. У `PlayerInput` есть
+  `MouseSmoothingMode`/`MouseSmoothingStrength` — это галочка «Mouse Smoothing» в настройках игры (в `Webhead.u`:
+  `cChkMouseSmoothing`, `SavedMouseSmoothing`, `set PlayerInput MouseSmoothingMode …`). С мышью на ПК сглаживание
+  незаметно (отсчёты идут ровно), а на телефоне жест приходит раз в кадр — сглаживание растягивает поворот на
+  несколько кадров, и камера «доезжает» после остановки пальца. Поэтому `host/boot/config.c` выставляет в
+  `System/User.ini` `[Engine.PlayerInput] MouseSmoothingMode=0` и `MouseSmoothingStrength=0.000000` при каждом
+  запуске (в логе `[config] User.ini: [Engine.PlayerInput] …`; повторно ничего не пишется, ключи сравниваются).
+  Ускорение (`MouseAccelThreshold`) не трогаем — у его «выключенного» нуля в этом движке неоднозначная трактовка.
 * **Куда идёт касание, решает не только «живой герой».** Экранное управление делит касания на два пути: тап —
   виртуальная мышь (`SnxNative.mouse`), драг по пустому месту — камера (`SnxNative.look`). Раньше «идёт ли
   геймплей» определялось только по живой пешке (`game_player_active`, поиск PlayerController/Pawn в объектах

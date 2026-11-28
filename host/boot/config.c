@@ -735,6 +735,15 @@ void boot_config_apply(int res_w, int res_h)
         free(u);
         free(g);
     }
+    // Обзор в игре сглаживает сам движок: Engine.PlayerInput.MouseSmoothingMode/MouseSmoothingStrength — это
+    // галочка «Mouse Smoothing» в настройках игры (в Webhead.u: cChkMouseSmoothing, SavedMouseSmoothing,
+    // `set PlayerInput MouseSmoothingMode …`). С настоящей мышью на ПК сглаживание почти незаметно: отсчёты идут
+    // ровно. На телефоне жест приходит раз в кадр, и сглаживание превращается в «камера едет ещё чуть-чуть
+    // после остановки пальца и возвращается назад» — ровно жалоба «камерой неудобно управлять». Силу ставим
+    // в 0: при нуле сглаживания нет независимо от режима. Если игрок включит галочку в настройках игры, она
+    // запишет своё значение в User.ini, и порт выключит сглаживание снова при следующем запуске.
+    set(user, "Engine.PlayerInput", "MouseSmoothingMode", "0");
+    set(user, "Engine.PlayerInput", "MouseSmoothingStrength", "0.000000");
     repair_bindings(user);
     for (size_t i = 0; i < sizeof g_joy_bindings / sizeof g_joy_bindings[0]; i++) {
         const char *k = g_joy_bindings[i][0];
