@@ -215,19 +215,12 @@ class GameActivity : SDLActivity(), InputManager.InputDeviceListener, DisplayMan
         val c = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val pad = Ui.dp(this, 16f)
         c.setPadding(pad, Ui.dp(this, 8f), pad, 0)
-        // Единственная настройка камеры: чувствительность, она же «чувствительность мыши» — сколько градусов
-        // поворота даёт жест по всей высоте экрана (1.6 → 144°, верх — 5.0 → 450°).
-        c.addView(Ui.seekRow(this, L.t("Чувствительность камеры (мышь)", "Camera sensitivity (mouse)"), 49,
+        // Единственная настройка камеры — чувствительность, она же «скорость мыши»: 1.0 — пиксель пальца равен
+        // отсчёту мыши, как курсор на ПК; больше — быстрее поворот на тот же жест.
+        c.addView(Ui.seekRow(this, L.t("Чувствительность камеры", "Camera sensitivity"), 49,
             ((settings.lookSensitivity - 0.1f) * 10f).toInt().coerceIn(0, 49),
             { "%.1f".format(0.1f + it / 10f) }) {
             settings.lookSensitivity = 0.1f + it / 10f
-            camApply()
-        })
-        // «Держать угол»: без этого игра сама доворачивает камеру за спину герою — камера «отщёлкивается назад»
-        c.addView(Ui.switchRow(this, L.t("Камера держит угол", "Camera holds its angle"),
-            L.t("Не даёт камере возвращаться назад после поворота", "Keeps the camera from snapping back after a turn"),
-            settings.camHold) {
-            settings.camHold = it
             camApply()
         })
         c.addView(Ui.switchRow(this, L.t("Зеркалить поворот (влево/вправо)", "Mirror turn (left/right)"), null,
@@ -256,11 +249,10 @@ class GameActivity : SDLActivity(), InputManager.InputDeviceListener, DisplayMan
             .show()
     }
 
-    // параметры камеры живьём (чувствительность, мёртвая зона, скорость, зеркало осей) — без перезапуска игры
+    // параметры камеры живьём (чувствительность, зеркало осей) — без перезапуска игры
     private fun camApply() {
         try {
             SnxNative.camMirror(settings.camInvX, settings.camInvY)
-            SnxNative.camHold(settings.camHold)
             SnxNative.lookSens(settings.lookSensitivity)
         } catch (e: UnsatisfiedLinkError) { }
     }

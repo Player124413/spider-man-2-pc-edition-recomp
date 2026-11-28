@@ -312,9 +312,6 @@ class LauncherActivity : Activity() {
         })
         c.addView(Ui.label(this, L.t("В игре — шестерёнка в левом верхнем углу. Палец на свободном месте экрана — камера.", "In game: the gear in the top-left corner. A finger on a free area of the screen moves the camera."),
             dim = true, size = 12f).apply { setPadding(0, Ui.dp(this@LauncherActivity, 6f), 0, 0) })
-        c.addView(Ui.switchRow(this, L.t("Камера держит угол", "Camera holds its angle"),
-            L.t("Не даёт камере возвращаться назад после поворота", "Keeps the camera from snapping back after a turn"),
-            s.camHold) { s.camHold = it })
         c.addView(Ui.switchRow(this, L.t("Экранное управление", "Touch controls"), null, s.touchEnabled) { s.touchEnabled = it })
         c.addView(Ui.switchRow(this, L.t("Прятать при геймпаде", "Hide with a gamepad"), L.t("Подключён геймпад — кнопки на экране не нужны", "A gamepad is connected — no need for on-screen buttons"),
             s.hideWithGamepad) { s.hideWithGamepad = it })
@@ -326,8 +323,8 @@ class LauncherActivity : Activity() {
             L.force = it
             recreate()
         })
-        // Камера пальцем — как мышь в ПК-версии, и настройка у неё одна: чувствительность (чувствительность мыши).
-        c.addView(Ui.seekRow(this, L.t("Чувствительность камеры (мышь)", "Camera sensitivity (mouse)"), 49,
+        // Камера пальцем — как мышь в ПК-версии, и настройка у неё одна: чувствительность (скорость мыши).
+        c.addView(Ui.seekRow(this, L.t("Чувствительность камеры", "Camera sensitivity"), 49,
             ((s.lookSensitivity - 0.1f) * 10f).toInt().coerceIn(0, 49),
             { "%.1f".format(0.1f + it / 10f) }) { s.lookSensitivity = 0.1f + it / 10f })
         c.addView(Ui.seekRow(this, L.t("Прозрачность кнопок", "Button opacity"), 18, ((s.opacity - 0.1f) * 20f).toInt(),

@@ -95,7 +95,7 @@ JNIEXPORT void JNICALL JNI_FN(camMirror)(JNIEnv *env, jclass cls, jboolean inv_x
     input_set_cam_mirror(inv_x ? 1 : 0, inv_y ? 1 : 0);
 }
 
-// «Держать угол»: камера остаётся там, куда её поставил игрок (переключатель в шестерёнке)
+// «Держать угол» — устарело: удержание убрано (камера теперь чистая мышь), вызов сохранён ради JNI-совместимости
 JNIEXPORT void JNICALL JNI_FN(camHold)(JNIEnv *env, jclass cls, jboolean on)
 {
     (void)env;
