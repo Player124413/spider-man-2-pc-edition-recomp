@@ -289,7 +289,7 @@ static void test_bink_container_hle(const char *tmp_dir)
     // Ролик с настоящими размерами кадра и очень быстрыми кадрами (fps=1000, кадр 1 мс): на нём проверяется
     // расписание BinkWait — если игра не успевает, кадры пропускаются, а не растягивают ролик.
     u8 pacing_bik[1024];
-    u32 pacing_sz = build_valid_bik(pacing_bik, 8, 8, 1000, 1, 0x5000);
+    u32 pacing_sz = build_valid_bik(pacing_bik, 8, 8, 100, 1, 0x5000);
     snprintf(fpath, sizeof fpath, "%s/pacing.bik", movies);
     write_file_bytes(fpath, pacing_bik, pacing_sz);
 
@@ -429,10 +429,12 @@ static void test_bink_container_hle(const char *tmp_dir)
     CHECK(bp != 0, "BinkOpen pacing.bik вернул 0");
     if (bp) {
         u32 a_b[1] = {bp};
-        // Первый вызов заводит расписание и просит подождать: кадр 0 ещё показывается.
-        CHECK(hle_call(hle_binkw32__BinkWait_4, 1, a_b) == 1, "BinkWait на старте ролика должен вернуть 1");
-        CHECK(rd32(g_mem, bp + 12) == 1, "BinkWait без BinkNextFrame не должен двигать кадр до времени");
-        usleep(30000);  // 30 кадров ролика (по 1 мс) — телефон «не успел»
+        // Первый кадр ролика готов сразу (0), следующий — через период (fps=100 → 10 мс).
+        CHECK(hle_call(hle_binkw32__BinkWait_4, 1, a_b) == 0, " первый кадр ролика должен быть готов сразу");
+        CHECK(rd32(g_mem, bp + 12) == 1, "без BinkNextFrame и без прошедшего времени кадр не двигается");
+        CHECK(hle_call(hle_binkw32__BinkWait_4, 1, a_b) == 1, "через 0 мс BinkWait должен просить подождать");
+        CHECK(rd32(g_mem, bp + 12) == 1, "опрос «ещё рано» не должен двигать расписание (ролик не замирает)");
+        usleep(30000);  // 30 мс — три кадра ролика: телефон «не успел»
         CHECK(hle_call(hle_binkw32__BinkWait_4, 1, a_b) == 0, "BinkWait после паузы должен вернуть 0");
         CHECK(rd32(g_mem, bp + 12) == 2, "отставшие кадры ролика должны пропускаться (FrameNum=%u)",
               rd32(g_mem, bp + 12));

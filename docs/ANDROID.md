@@ -326,6 +326,10 @@ APK Spider-Man 2 использует отдельный `applicationId` (`com.w
   заново, без прыжка. В журнале: `[bink] movie 640x480: 60 frames in 2.0 s (30.0 fps, movie 30.00 fps,
   skipped 0)` и итог при закрытии — `movie played: N frames shown, K skipped, T s wall vs E s of movie (P% of
   real time)`.
+  * Важно: «ещё рано» (`BinkWait` = 1) расписание **не двигает** — иначе каждый опрос съедал бы период и ролик
+    замирал бы на первом кадре (так случилось в 145: чёрный экран при идущем звуке). Если порт 240 раз подряд
+    получил «ещё рано», он сам отпускает кадр и пишет `[bink] movie stuck: waited 240 times in a row, releasing
+    the frame`.
 * Звук роликов играет **порт**, а не игра: на ПК звук Bink-ролика играет сам Bink через DirectAudio, и игра
   (Engine) PCM роликов не забирает вовсе — в журнале у каждого ролика `movie closed: 0 audio frame(s) taken by
   the game`. Поэтому в `runtime/hle/bink.c` дорожка ролика декодируется своим декодером (`bink_audio.c`) и

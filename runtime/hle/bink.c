@@ -53,6 +53,7 @@ typedef struct {
     u32 skipped;           // кадров пропущено, чтобы ролик не отставал от реального времени
     u32 shown;             // кадров показано игре (BinkCopyToBuffer)
     u64 start_ns;          // когда ролик пошёл (для отчёта «сколько против ожидаемого»)
+    u32 waits;             // сколько раз подряд BinkWait ответил «ещё рано» (защита от замирания ролика)
     u64 stats_ns, copy_ns; // статистика (movie_stats): начало отрезка, время перевода кадров
     u32 copy_n;
 } bink;
@@ -379,6 +380,7 @@ static void movie_clock_restart(bink *b)
     b->start_ns = 0;
     b->skipped = 0;
     b->shown = 0;
+    b->waits = 0;
 }
 
 // Раз в 2 с, пока ролик идёт: скорость декодирования и перевода кадра в snx.log
@@ -902,20 +904,35 @@ void hle_binkw32__BinkWait_4(CPU *c)
             b->next_ns = now;
             b->start_ns = now;
         }
-        u32 late = 0;  // сколько периодов уже прошло сверх одного
-        while (now >= b->next_ns + period * (u64)(late + 1) && late < MOV_MAX_SKIP)
-            late++;
-        b->next_ns += period * (u64)(late + 1);
-        if (late) {  // кадры, которые всё равно не показать: пропускаем, чтобы картинка не отставала от звука
-            u32 target = b->frame + late;
-            if (target >= b->frames)
-                target = b->frames - 1;
-            b->skipped += target - b->frame;
-            b->frame = target;
-            sync_obj(b);
-            movie_audio_pump(b);  // очередь звука пополняется и пропущенными кадрами — провалов нет
-        } else {
+        // next_ns — когда текущий кадр должен был пойти на экран. Пока время не пришло — 1 («ещё рано»), и
+        // расписание НЕ двигаем: иначе каждый опрос сдвигал бы показ на кадр вперёд и ролик замирал на первом
+        // кадре (в 145 ролики из-за этого стали чёрными). Пришло время — пускаем кадр (0). Если игра опоздала на
+        // несколько периодов, лишние кадры пропускаем, а расписание ставим на ближайший будущий кадр, чтобы
+        // отставание не копилось.
+        if (now < b->next_ns) {
             wait = 1;
+            if (++b->waits > 240) {  // 2+ с «ещё рано» подряд: расписание сломалось или часы уехали
+                if (b->waits == 241)  // один раз в журнал — видно, если ролик опять замрёт
+                    fprintf(stderr, "[bink] movie stuck: waited 240 times in a row, releasing the frame\n");
+                b->next_ns = now;  // отпускаем кадр прямо сейчас, дальше — обычное расписание
+                b->start_ns = now;
+                b->waits = 0;
+                wait = 0;
+            }
+        } else {
+            u64 late64 = (now - b->next_ns) / period;  // сколько кадров уже просрочено (0 — как раз пора)
+            u32 late = late64 > MOV_MAX_SKIP ? MOV_MAX_SKIP : (u32)late64;
+            b->next_ns += period * (late64 + 1);  // следующий показ — по исходному расписанию, без накопления
+            b->waits = 0;
+            if (late) {  // эти кадры всё равно не показать: пропускаем, чтобы картинка не отставала от звука
+                u32 target = b->frame + late;
+                if (target >= b->frames)
+                    target = b->frames - 1;
+                b->skipped += target - b->frame;
+                b->frame = target;
+                sync_obj(b);
+                movie_audio_pump(b);  // очередь звука пополняется и пропущенными кадрами — провалов нет
+            }
         }
     } else if (b && b->fps) {  // не ролик (звук в пакете) — как раньше: ждём от последнего обращения
         u64 p = movie_period_ns(b);
