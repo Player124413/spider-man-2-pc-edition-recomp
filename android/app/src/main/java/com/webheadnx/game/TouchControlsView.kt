@@ -73,7 +73,7 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
     private val rect = RectF()
 
     // ---------------------------------------------------------------- состояние пальцев (игра)
-    private enum class Bind { NONE, CONTROL, LOOK, GEAR, SLOT, MENU_TAP }
+    private enum class Bind { NONE, IGNORE, CONTROL, LOOK, GEAR, SLOT, MENU_TAP }
     // combo — пока палец держал «Зелья», жали другую кнопку (ZL+A и т. п.): тогда при отпускании слот не пьётся
     private class Finger(var bind: Bind = Bind.NONE, var ctl: Control? = null, var lastX: Float = 0f, var lastY: Float = 0f,
                          var startX: Float = 0f, var startY: Float = 0f, var combo: Boolean = false)
@@ -118,10 +118,6 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
         (!hiddenByGamepad && settings.touchEnabled)
     private fun controlsVisible(): Boolean = editMode ||
         (!hiddenByGamepad && settings.touchEnabled)
-    private fun menuActive() = passThroughMenu || hiddenByMenu || menuOverride || !inGame
-    private fun menuTapAt(x: Float, y: Float): Boolean = menuActive() &&
-        hit(x, y, ALL_KINDS) == null && slotArrowAt(x, y) == 0 && floatingStickAt(x) == null &&
-        !onGearAt(x, y)
 
     // ---------------------------------------------------------------- рисование
     override fun onDraw(canvas: Canvas) {
@@ -310,7 +306,7 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 val x = e.getX(idx); val y = e.getY(idx)
-                if (!onGearAt(x, y) && !menuTapAt(x, y) && !active()) return false
+                if (!onGearAt(x, y) && !active()) return false
                 down(e.getPointerId(idx), x, y)
             }
             MotionEvent.ACTION_POINTER_DOWN -> down(e.getPointerId(idx), e.getX(idx), e.getY(idx))
@@ -359,13 +355,6 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
         val f = Finger(lastX = x, lastY = y, startX = x, startY = y)
         fingers[id] = f
         if (onGearAt(x, y)) { f.bind = Bind.GEAR; return }
-        if (menuTapAt(x, y)) {
-            f.bind = Bind.MENU_TAP
-            // Курсор ведём без нажатой кнопки; сам щелчок — по отпусканию, если палец не сдвинулся.
-            SnxNative.mouse(x / max(1f, w()), y / max(1f, h()), -1)
-            invalidate()
-            return
-        }
         if (!active()) return
         val dir = slotArrowAt(x, y)
         if (dir != 0) {
@@ -401,13 +390,12 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
                 f.bind = Bind.CONTROL
                 f.ctl = fs
                 startStick(fs, id, x, y, x, y)
-            } else if (!lookAllowedAt(x)) {
-                f.bind = Bind.NONE  // левая половина — зона стика, камера тут не начинается
             } else {
-                f.bind = Bind.LOOK
-                if (lookPointer < 0) {  // второй палец на пустом месте камеру не тянет
-                    lookPointer = id
-                }
+                // Пустое место: решаем по движению, а не по состоянию порта. Тап (палец не сдвинулся) —
+                // щелчок в точке, драг — камера. Так меню работает всегда, а камера не зависит от того,
+                // угадал ли порт, что идёт геймплей (на телефоне «живой герой» не находится, и раньше
+                // из-за этого весь геймплей считался меню, а меню — геймплеем).
+                f.bind = Bind.NONE
             }
         }
         invalidate()
@@ -415,23 +403,23 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
 
     private fun move(id: Int, x: Float, y: Float) {
         val f = fingers[id] ?: return
+        if (f.bind == Bind.NONE && hypot(x - f.startX, y - f.startY) > 24f * density) {
+            // Палец поехал — значит это не тап. В настоящем GUI-меню (экраны настроек) драг двигает курсор
+            // и тянет ползунки, в остальных случаях это камера.
+            when {
+                hiddenByMenu -> f.bind = Bind.MENU_TAP
+                lookAllowedAt(x) && lookPointer < 0 -> {
+                    f.bind = Bind.LOOK
+                    lookPointer = id
+                }
+                else -> f.bind = Bind.IGNORE  // левая половина (зона стика) или второй палец — не камера
+            }
+        }
         when (f.bind) {
             Bind.MENU_TAP -> {
-                // Драг по пустому месту — это камера, даже если порт считает, что открыто меню. Иначе на
-                // устройствах, где «живой герой» не определяется (в логе port menu=1 весь геймплей), жест уходил
-                // в виртуальную мышь: камера дёргалась по абсолютной позиции курсора и возвращалась назад.
-                // Тап не задеваем: щелчок ставится только при смещении меньше 24 dp (см. up), а сюда попадает
-                // уже явный драг. В настоящем GUI-меню (hiddenByMenu) всё по-старому — там мышь тянет ползунки.
-                if (!hiddenByMenu && lookAllowedAt(x) &&
-                    hypot(x - f.startX, y - f.startY) > 32f * density) {
-                    f.bind = Bind.LOOK
-                    if (lookPointer < 0) lookPointer = id
-                    SnxNative.look((x - f.lastX) / max(1f, h()), (y - f.lastY) / max(1f, h()))
-                } else {
-                    // Курсор порт не рисует: он мешал смотреть меню. Внутренний курсор игры просто едет за
-                    // пальцем, чтобы на отпускании щелчок попал в пункт под пальцем.
-                    SnxNative.mouse(x / max(1f, w()), y / max(1f, h()), -1)
-                }
+                // Настоящее GUI-меню игры: курсор порт не рисует, но внутренний курсор игры едет за пальцем —
+                // так тянутся ползунки настроек. Щелчки по пунктам ставятся тапом (см. up).
+                SnxNative.mouse(x / max(1f, w()), y / max(1f, h()), -1)
             }
             Bind.LOOK -> {
                 if (id != lookPointer) return  // камеру ведёт первый палец на пустом месте
@@ -468,6 +456,19 @@ class TouchControlsView(ctx: Context, private val settings: Settings, val editMo
 
     private fun up(id: Int, x: Float, y: Float) {
         val f = fingers.remove(id) ?: return
+        if (f.bind == Bind.NONE) {
+            // Тап по пустому месту (палец не сдвинулся): щелчок в точке — так работают пункты меню, «Начать
+            // новую игру», подсказки и ролики. В геймплее, где живой герой известен, не кликаем: случайное
+            // нажатие в мире не нужно.
+            if (!inGame || passThroughMenu || hiddenByMenu)
+                SnxNative.mouse(x / max(1f, w()), y / max(1f, h()), 2)
+            invalidate()
+            return
+        }
+        if (f.bind == Bind.IGNORE) {
+            invalidate()
+            return
+        }
         if (f.bind == Bind.MENU_TAP) {
             // Тап = щелчок в точке пальца. Перетаскивание = только наведение (ползунки/подсветка).
             // порог щелчка с запасом: палец при тапе всегда чуть смещается, а промах на 12 dp читался
