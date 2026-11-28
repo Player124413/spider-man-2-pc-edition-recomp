@@ -166,8 +166,13 @@ class Module:
             targets.append(t)
             self.jt_slots.add(slot)
             slot += 4
-        if bound is None and self.img.has_relocs:
+        if self.img.has_relocs and (bound is None or not targets):
             # Отрицательные индексы (memcpy/memmove в CRT): релоцированные слоты перед базой таблицы.
+            # Пример: `jmp [ecx*4 + tbl+0x10]` с ecx = -3 (хвост memmove при n < 4 и невыровненном dst) —
+            # диспетчер стоит на 4 байта ПОСЛЕ настоящей таблицы, и без этого разбора таблица выходила пустой:
+            # тогда сгенерированный switch не имел ни одного case, и любой переход уходил в RT_ICALL
+            # («call to unknown guest address» на 0x13002af3 в msvcr71!memmove — вылет после роликов).
+            # bound тут ни при чём: `cmp idx,N` перед таким jmp относится к предыдущему диспетчеру.
             slot = table - 4
             back = []
             while len(back) < 16 and slot in self.img.relocs and self.in_code(self.img.u32(slot)):
@@ -175,6 +180,10 @@ class Module:
                 self.jt_slots.add(slot)
                 slot -= 4
             targets = back[::-1] + targets
+        if not targets:
+            # Таблицы нет (индекс отрицательный от чужой базы либо это не диспетчер): пустой JumpTable
+            # нельзя кешировать — emit сгенерировал бы switch без case'ов, то есть RT_ICALL на каждый переход.
+            return None
         jt = JumpTable(ins.addr, table, targets)
         self.jump_tables[ins.addr] = jt
         return jt

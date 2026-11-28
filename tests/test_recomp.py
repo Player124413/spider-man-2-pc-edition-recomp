@@ -771,6 +771,60 @@ class TestEmit(unittest.TestCase):
             gen.FUNCS_PER_FILE = orig_fpf
 
 
+class TestJumpTables(unittest.TestCase):
+    """Косвенные переходы по таблицам адресов, в том числе диспетчер ПОСЛЕ таблицы (отрицательный индекс)."""
+
+    def _memmove_like(self):
+        # Хвост memmove/memcpy из msvcr71: два перехода по одной и той же таблице адресов из четырёх блоков, но
+        # второй стоит на 16 байт позже её начала — индексы -3..0 (n < 4 при невыровненном dst). Раньше такая
+        # таблица выходила ПУСТОЙ (bound находился по чужому `cmp ecx,8`), в сгенерированном switch не было ни
+        # одного case, и переход уходил в RT_ICALL. В логе тестера это «TRAP at 13002af3: call to unknown guest
+        # address» сразу после роликов — msvcr71!memmove, блок 0x2af3 = вторая ячейка таблицы 0x2adc.
+        base = 0x10100000
+        code = bytearray(0x70)
+        code[0x00:0x03] = bytes.fromhex("558bec")                 # push ebp; mov ebp, esp
+        code[0x03:0x08] = bytes.fromhex("83f9087207")             # cmp ecx, 8; jb +7 -> 0x0f
+        code[0x08:0x0f] = b"\xff\x24\x8d" + struct.pack("<I", base + 0x1030)   # jmp [ecx*4 + tbl]
+        code[0x0f:0x16] = b"\xff\x24\x8d" + struct.pack("<I", base + 0x1040)   # jmp [ecx*4 + tbl + 0x10]
+        code[0x16] = 0xC3
+        for i in range(0x17, 0x30):
+            code[i] = 0xCC
+        for i, off in enumerate((0x50, 0x58, 0x60, 0x68)):
+            struct.pack_into("<I", code, 0x30 + 4 * i, base + 0x1000 + off)  # таблица: 4 релоцированных ячейки
+        code[0x40:0x47] = bytes.fromhex("8b4508" "5e5fc9c3")        # «код» сразу за таблицей (не релоцируется)
+        for off in (0x50, 0x58, 0x60, 0x68):
+            code[off] = 0xC3                                       # блоки-цели: ret
+        relocs = {base + 0x1000 + 0x30 + 4 * i for i in range(4)}
+        return base, bytes(code), relocs
+
+    def test_table_before_and_after_dispatch(self):
+        base, code, relocs = self._memmove_like()
+        prog, mod = make_program(code, base=base, relocs=relocs)
+        mod.run()
+        want = [base + 0x1000 + off for off in (0x50, 0x58, 0x60, 0x68)]
+        for disp in (0x1008, 0x100F):
+            jt = mod.jump_tables.get(base + disp)
+            self.assertIsNotNone(jt, f"таблица не найдена у диспетчера {disp:#x}")
+            self.assertEqual(jt.targets, want, f"цели таблицы у диспетчера {disp:#x}")
+        out = emit.FuncCompiler(mod, mod.functions[base + 0x1000], gen.Ctx(prog)).compile()
+        self.assertEqual(out.count("case 0x10101050u: goto L_10101050;"), 2)
+
+    def test_empty_table_is_not_a_jump_table(self):
+        # Диспетчер со «своей» таблицей, ячеек которой нет в релокациях: таблицу нельзя выдавать пустой —
+        # иначе switch без case'ов, то есть RT_ICALL на каждый переход.
+        base = 0x10100000
+        code = bytearray(0x40)
+        code[0x00:0x03] = bytes.fromhex("558bec")
+        code[0x03:0x0A] = b"\xff\x24\x8d" + struct.pack("<I", base + 0x1030)  # jmp [ecx*4 + 0x1030]
+        code[0x0A] = 0xC3
+        for i in range(0x0B, 0x30):
+            code[i] = 0xCC
+        code[0x30:0x34] = bytes.fromhex("01020304")  # не адреса в коде и не релоки
+        prog, mod = make_program(bytes(code), base=base, relocs=set())
+        mod.run()
+        self.assertIsNone(mod.jump_tables.get(base + 0x1003))
+
+
 class TestCheckAndOverrides(unittest.TestCase):
     """Тесты main.py check и overrides.verify на синтетических каталогах и PE."""
 
